@@ -1,0 +1,25 @@
+ACTOR CONNECTION GAME - RENDER DEPLOYMENT
+
+This package is prepared for Render.
+
+Important: Do NOT upload this ZIP directly to Render. Render deploys application code from a Git repository (or Docker image). Unzip this package, put these files in a GitHub repository, then connect that repository to Render.
+
+Files Render needs:
+- server.py
+- index.html
+- render.yaml
+- eligibility_overrides.json
+- used_starters.json
+
+Secret required on Render:
+TMDB_API_TOKEN = your TMDB API Read Access Token
+
+The included render.yaml configures:
+- Python web service
+- Free plan
+- python server.py start command
+- /api/status health check
+- HOST=0.0.0.0
+- Python 3.12.7
+
+Do not commit your TMDB token into any file.

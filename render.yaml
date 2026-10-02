@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: actor-connection-game
+    runtime: python
+    plan: free
+    buildCommand: ""
+    startCommand: python server.py
+    healthCheckPath: /api/status
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: HOST
+        value: 0.0.0.0
+      - key: TMDB_API_TOKEN
+        sync: false
