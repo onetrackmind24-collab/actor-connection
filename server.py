@@ -451,7 +451,7 @@ def generate_puzzle(difficulty='expert'):
         return route,route_meta
 
     ordered=[names[(start_at+i)%len(names)] for i in range(len(names))]
-    fresh=[n for n in ordered if n not in USED_STARTERS]
+    passes=[fresh] if fresh else [ordered]
     passes=[fresh, ordered] if fresh else [ordered]
     for pass_names in passes:
       for candidate_name in pass_names:
