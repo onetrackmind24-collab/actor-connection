@@ -282,6 +282,7 @@ def _bounded_bfs(start,target,max_depth,movie_limit,cast_limit):
         pid,path=q.popleft()
         if len(path)>=max_depth: continue
         stats['actors_expanded'] += 1
+        if stats['actors_expanded'] > 8: return None,stats
         for aid,step in _neighbors(pid,movie_limit,cast_limit,stats):
             if aid in seen: continue
             np=path+[step]
@@ -304,7 +305,7 @@ def find_path_with_meta(start,target,max_depth=6):
 
     # Fast first pass, then progressively wider passes. This improves route quality
     # without making every puzzle generation pay the cost of a huge graph crawl.
-    stages=[(40,35),(80,60),(140,100)]
+    stages=[(8,20),(12,25)]
     best=None; best_stats=None
     for movie_limit,cast_limit in stages:
         path,stats=_bounded_bfs(start,target,max_depth,movie_limit,cast_limit)
