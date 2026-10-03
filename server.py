@@ -409,8 +409,8 @@ def live_candidate_catalog(max_pages=5):
             for x in data.get('results',[]):
                 if x.get('known_for_department')!='Acting' or not x.get('name'): continue
                 pid=str(x.get('id'))
+                known_movies=[k for k in (x.get('known_for') or []) if k.get('media_type')=='movie']
                 if len(known_movies) < 2 or not x.get('profile_path'): continue
-                seen.add(pid)
                 known_movies=[k for k in (x.get('known_for') or []) if k.get('media_type')=='movie']
                 if not known_movies or not x.get('profile_path'): continue
                 out.append({'id':x.get('id'),'name':x['name'],'profile_path':x.get('profile_path'),
