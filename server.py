@@ -408,7 +408,7 @@ def live_candidate_catalog(max_pages=5):
                 pid=str(x.get('id'))
                 if not pid or pid in seen: continue
                 seen.add(pid)
-                films=[k for k in x.get('known_for',[]) if k.get('media_type')=='movie']
+                films= movies(pid)
                 # Exclude people surfaced only for television; the game is movies-only.
                 if not films: continue
                 out.append({'id':x.get('id'),'name':x['name'],'profile_path':x.get('profile_path'),
