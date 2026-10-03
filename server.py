@@ -408,11 +408,20 @@ def live_candidate_catalog(max_pages=5):
                 pid=str(x.get('id'))
                 if not pid or pid in seen: continue
                 seen.add(pid)
-                films= movies(pid)
-                # Exclude people surfaced only for television; the game is movies-only.
-                if not films: continue
-                out.append({'id':x.get('id'),'name':x['name'],'profile_path':x.get('profile_path'),
-                            'popularity':float(x.get('popularity') or 0),'known_for':films})
+                films=movies(pid)
+
+            # Starters must have a real movie-acting footprint, not just a cameo or stray credit.
+            meaningful_films = [
+                m for m in films
+                if (m.get('order') if m.get('order') is not None else 999) <= 20
+            ]
+            if len(meaningful_films) < 3:
+                continue
+            if not x.get('profile_path'):
+                continue
+
+            out.append({'id':x.get('id'),'name':x['name'],'profile_path':x.get('profile_path'),
+                        'popularity':float(x.get('popularity') or 0),'known_for':films})
         return out
     return cached(f'candidate_catalog_{max_pages}',load)
 
