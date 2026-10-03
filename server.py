@@ -422,6 +422,18 @@ def live_candidate_catalog(max_pages=5):
 def candidate_names_for(difficulty):
     if DEMO_MODE:
         return list(PUZZLE_CANDIDATES[difficulty])
+    if difficulty=='beginner':
+        beginner_names=[
+            'Tom Hanks','Julia Roberts','Brad Pitt','Sandra Bullock','George Clooney',
+            'Matt Damon','Leonardo DiCaprio','Meryl Streep','Tom Cruise','Samuel L. Jackson',
+            'Morgan Freeman','Robert De Niro','Al Pacino','Harrison Ford','Will Smith',
+            'Nicole Kidman','Jennifer Lawrence','Scarlett Johansson','Anne Hathaway','Christian Bale',
+            'Ryan Reynolds','Ryan Gosling','Chris Evans','Chris Hemsworth','Robert Downey Jr.',
+            'Mark Wahlberg','Ben Affleck','Jennifer Aniston','Reese Witherspoon','Charlize Theron',
+            'Natalie Portman','Keanu Reeves','Steve Carell','Adam Sandler','Eddie Murphy',
+            'Jim Carrey','Jamie Foxx','Viola Davis','Kevin Costner','Matthew McConaughey'
+        ]
+        return beginner_names 
     catalog=live_candidate_catalog()
     # Popularity is a starting recognizability heuristic, not the final difficulty model.
     # Beginner favors familiar faces; Expert favors the lower half of a still-recognizable
