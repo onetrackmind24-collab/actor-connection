@@ -400,6 +400,9 @@ def live_candidate_catalog(max_pages=5):
     if DEMO_MODE:
         return [{'name':n,'popularity':0,'known_for':[]} for n in DEMO_PEOPLE]
     def load():
+        # Keep startup cheap: /person/popular already includes a small known_for sample.
+        # The old code fetched a full filmography for every popular person (up to ~100
+        # extra provider calls) before a difficulty button could even respond.
         out=[]; seen=set()
         for page in range(1,max_pages+1):
             data=tmdb('/person/popular',{'page':page})
@@ -408,20 +411,10 @@ def live_candidate_catalog(max_pages=5):
                 pid=str(x.get('id'))
                 if not pid or pid in seen: continue
                 seen.add(pid)
-                films=movies(pid)
-
-            # Starters must have a real movie-acting footprint, not just a cameo or stray credit.
-            meaningful_films = [
-                m for m in films
-                if (m.get('order') if m.get('order') is not None else 999) <= 20
-            ]
-            if len(meaningful_films) < 3:
-                continue
-            if not x.get('profile_path'):
-                continue
-
-            out.append({'id':x.get('id'),'name':x['name'],'profile_path':x.get('profile_path'),
-                        'popularity':float(x.get('popularity') or 0),'known_for':films})
+                known_movies=[k for k in (x.get('known_for') or []) if k.get('media_type')=='movie']
+                if not known_movies or not x.get('profile_path'): continue
+                out.append({'id':x.get('id'),'name':x['name'],'profile_path':x.get('profile_path'),
+                            'popularity':float(x.get('popularity') or 0),'known_for':known_movies})
         return out
     return cached(f'candidate_catalog_{max_pages}',load)
 
@@ -500,7 +493,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'build':'2026-10-03-fix1','eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
