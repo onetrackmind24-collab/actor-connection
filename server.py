@@ -492,16 +492,51 @@ CURATED_ALPHA_ROUTES={
         ('Brad Pitt',[('Se7en','Morgan Freeman')]),
         ('Tim Robbins',[('The Shawshank Redemption','Morgan Freeman')]),
         ('Clint Eastwood',[('Million Dollar Baby','Morgan Freeman')]),
+        ('Tom Cruise',[('Oblivion','Morgan Freeman')]),
+        ('Michael Caine',[('The Dark Knight','Morgan Freeman')]),
+        ('Angelina Jolie',[('Wanted','Morgan Freeman')]),
+        ('Bruce Willis',[('RED','Morgan Freeman')]),
+        ('Robert De Niro',[('Last Vegas','Morgan Freeman')]),
+        ('Denzel Washington',[('Glory','Morgan Freeman')]),
+        ('Matt Damon',[('Invictus','Morgan Freeman')]),
+        ('Keanu Reeves',[('Chain Reaction','Morgan Freeman')]),
+        ('Scarlett Johansson',[('Lucy','Morgan Freeman')]),
     ],
     'intermediate':[
         ('Ben Affleck',[('The Sum of All Fears','Morgan Freeman')]),
         ('Jack Nicholson',[('The Bucket List','Morgan Freeman')]),
         ('Christian Bale',[('The Dark Knight Rises','Morgan Freeman')]),
+        ('Gene Hackman',[('Unforgiven','Morgan Freeman')]),
+        ('Ashley Judd',[('Kiss the Girls','Morgan Freeman')]),
+        ('Kevin Costner',[('Robin Hood: Prince of Thieves','Morgan Freeman')]),
+        ('Matthew McConaughey',[('Amistad','Morgan Freeman')]),
+        ('Mark Ruffalo',[('Now You See Me','Morgan Freeman')]),
+        ('Jesse Eisenberg',[('Now You See Me','Morgan Freeman')]),
+        ('Woody Harrelson',[('Now You See Me','Morgan Freeman')]),
+        ('Gerard Butler',[('Olympus Has Fallen','Morgan Freeman')]),
+        ('Tommy Lee Jones',[('High Crimes','Morgan Freeman')]),
+        ('Helen Mirren',[('RED','Morgan Freeman')]),
+        ('Dustin Hoffman',[('Outbreak','Morgan Freeman')]),
     ],
     'expert':[
         ('Casey Affleck',[('Gone Baby Gone','Morgan Freeman')]),
         ('John Cusack',[('The Contract','Morgan Freeman')]),
-        ('Antonio Banderas',[('The Code','Morgan Freeman')]),
+        ('Antonio Banderas',[('Thick as Thieves','Morgan Freeman')]),
+        ('Paz Vega',[('10 Items or Less','Morgan Freeman')]),
+        ('Cary Elwes',[('Kiss the Girls','Morgan Freeman')]),
+        ('Monica Potter',[('Along Came a Spider','Morgan Freeman')]),
+        ('Dylan Baker',[('Along Came a Spider','Morgan Freeman')]),
+        ('Clive Owen',[('Last Knights','Morgan Freeman')]),
+        ('Virginia Madsen',[('The Magic of Belle Isle','Morgan Freeman')]),
+        ('Zach Braff',[('Going in Style','Morgan Freeman')]),
+        ('Christopher Walken',[('The Maiden Heist','Morgan Freeman')]),
+        ('William H. Macy',[('The Maiden Heist','Morgan Freeman')]),
+        ('Minnie Driver',[('Hard Rain','Morgan Freeman')]),
+        ('Christian Slater',[('Hard Rain','Morgan Freeman')]),
+        ('Tea Leoni',[('Deep Impact','Morgan Freeman')]),
+        ('Elijah Wood',[('Deep Impact','Morgan Freeman')]),
+        ('James McAvoy',[('Wanted','Morgan Freeman')]),
+        ('Common',[('Wanted','Morgan Freeman')]),
     ],
 }
 
@@ -551,8 +586,16 @@ def generate_puzzle(difficulty='expert'):
     # expensive six-degree graph crawl on the request that follows a button tap.
     # Every step is still checked against live provider credits before serving.
     curated=CURATED_ALPHA_ROUTES.get(difficulty,[])
-    curated_order=[x for x in curated if x[0] not in USED_STARTERS] or curated
-    for candidate_name,steps in curated_order:
+    # Prefer a fresh starter, but if the remaining fresh entries fail provider
+    # resolution, immediately recycle a known-good curated starter instead of
+    # dropping into the expensive live graph crawl. This keeps repeated alpha
+    # games fast even after the no-repeat pool has been used up.
+    fresh=[x for x in curated if x[0] not in USED_STARTERS]
+    curated_passes=[fresh]
+    if fresh != curated:
+        curated_passes.append(curated)
+    for curated_order in curated_passes:
+      for candidate_name,steps in curated_order:
         candidate=person(candidate_name)
         if not candidate or str(candidate.get('id'))==str(target.get('id')):
             continue
@@ -632,7 +675,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-matchup-cut-v1','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-fast-pool-v2','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
