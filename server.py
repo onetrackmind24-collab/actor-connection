@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, time, urllib.parse, urllib.request, threading, secrets, datetime, sqlite3, statistics
+import json, os, time, urllib.parse, urllib.request, threading, secrets, datetime, sqlite3, statistics, unicodedata
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from collections import deque
@@ -282,7 +282,6 @@ def _bounded_bfs(start,target,max_depth,movie_limit,cast_limit):
         pid,path=q.popleft()
         if len(path)>=max_depth: continue
         stats['actors_expanded'] += 1
-        if stats['actors_expanded'] > 8: return None,stats
         for aid,step in _neighbors(pid,movie_limit,cast_limit,stats):
             if aid in seen: continue
             np=path+[step]
@@ -305,7 +304,7 @@ def find_path_with_meta(start,target,max_depth=6):
 
     # Fast first pass, then progressively wider passes. This improves route quality
     # without making every puzzle generation pay the cost of a huge graph crawl.
-    stages=[(8,20),(12,25)]
+    stages=[(40,35),(80,60),(140,100)]
     best=None; best_stats=None
     for movie_limit,cast_limit in stages:
         path,stats=_bounded_bfs(start,target,max_depth,movie_limit,cast_limit)
@@ -410,8 +409,8 @@ def live_candidate_catalog(max_pages=5):
             for x in data.get('results',[]):
                 if x.get('known_for_department')!='Acting' or not x.get('name'): continue
                 pid=str(x.get('id'))
-                known_movies=[k for k in (x.get('known_for') or []) if k.get('media_type')=='movie']
-                if len(known_movies) < 2 or not x.get('profile_path'): continue
+                if not pid or pid in seen: continue
+                seen.add(pid)
                 known_movies=[k for k in (x.get('known_for') or []) if k.get('media_type')=='movie']
                 if not known_movies or not x.get('profile_path'): continue
                 out.append({'id':x.get('id'),'name':x['name'],'profile_path':x.get('profile_path'),
@@ -422,18 +421,6 @@ def live_candidate_catalog(max_pages=5):
 def candidate_names_for(difficulty):
     if DEMO_MODE:
         return list(PUZZLE_CANDIDATES[difficulty])
-    if difficulty=='beginner':
-        beginner_names=[
-            'Tom Hanks','Julia Roberts','Brad Pitt','Sandra Bullock','George Clooney',
-            'Matt Damon','Leonardo DiCaprio','Meryl Streep','Tom Cruise','Samuel L. Jackson',
-            'Morgan Freeman','Robert De Niro','Al Pacino','Harrison Ford','Will Smith',
-            'Nicole Kidman','Jennifer Lawrence','Scarlett Johansson','Anne Hathaway','Christian Bale',
-            'Ryan Reynolds','Ryan Gosling','Chris Evans','Chris Hemsworth','Robert Downey Jr.',
-            'Mark Wahlberg','Ben Affleck','Jennifer Aniston','Reese Witherspoon','Charlize Theron',
-            'Natalie Portman','Keanu Reeves','Steve Carell','Adam Sandler','Eddie Murphy',
-            'Jim Carrey','Jamie Foxx','Viola Davis','Kevin Costner','Matthew McConaughey'
-        ]
-        return beginner_names 
     catalog=live_candidate_catalog()
     # Popularity is a starting recognizability heuristic, not the final difficulty model.
     # Beginner favors familiar faces; Expert favors the lower half of a still-recognizable
@@ -445,12 +432,101 @@ def candidate_names_for(difficulty):
     else: band=ranked[max(30,n//2):] or ranked
     return [x['name'] for x in band if x['name']!=TARGET_NAME]
 
+
+
+# Fast, curated alpha routes. These are resolved against the live provider before
+# a puzzle is served, so the game still validates real movie credits. They keep
+# difficulty selection responsive while the broader graph search remains as a fallback.
+CURATED_ALPHA_ROUTES={
+    'beginner':[
+        ('Tom Hanks',[('Philadelphia','Denzel Washington')]),
+        ('Julia Roberts',[('The Pelican Brief','Denzel Washington')]),
+        ('Steve Martin',[('Bringing Down the House','Queen Latifah'),('The Bone Collector','Denzel Washington')]),
+    ],
+    'intermediate':[
+        ('George Clooney',[("Ocean's Eleven",'Matt Damon'),('Courage Under Fire','Denzel Washington')]),
+        ('Paul Giamatti',[('Cinderella Man','Russell Crowe'),('Virtuosity','Denzel Washington')]),
+        ('Jeff Bridges',[('The Big Lebowski','John Goodman'),('Flight','Denzel Washington')]),
+    ],
+    'expert':[
+        ('Michael Shannon',[('Man of Steel','Russell Crowe'),('Virtuosity','Denzel Washington')]),
+        ('John C. Reilly',[('Boogie Nights','Luis Guzman'),('The Bone Collector','Denzel Washington')]),
+        ('Steve Buscemi',[('The Big Lebowski','John Goodman'),('Flight','Denzel Washington')]),
+    ],
+}
+
+def _title_key(value):
+    value=unicodedata.normalize('NFKD',str(value or ''))
+    return ''.join(ch.lower() for ch in value if ch.isalnum() and not unicodedata.combining(ch))
+
+def _name_key(value):
+    value=unicodedata.normalize('NFKD',str(value or ''))
+    return ''.join(ch.lower() for ch in value if ch.isalnum() and not unicodedata.combining(ch))
+
+def resolve_curated_route(start_person, steps):
+    """Resolve and validate a short named route using the live provider.
+
+    This is intentionally small and deterministic: each movie must be in the
+    current actor's movie credits and the named next actor must be in that
+    movie's eligible cast. If anything fails, return None and let normal graph
+    search handle the candidate instead.
+    """
+    current=public_person(start_person)
+    route=[]
+    for movie_title,next_actor_name in steps:
+        wanted=_title_key(movie_title)
+        movie=next((m for m in movies(current['id']) if _title_key(m.get('title'))==wanted),None)
+        if not movie:
+            return None
+        movie_cast=eligible_cast(movie.get('id'))
+        next_actor=next((a for a in movie_cast if _name_key(a.get('name',''))==_name_key(next_actor_name)),None)
+        if not next_actor:
+            return None
+        route.append({'movie':{'id':movie.get('id'),'title':movie.get('title'),'poster_path':movie.get('poster_path')},
+                      'actor':public_person(next_actor)})
+        current=public_person(next_actor)
+    return route if route and str(current.get('name','')).casefold()==TARGET_NAME.casefold() else None
+
 def generate_puzzle(difficulty='expert'):
     cleanup_puzzles()
     difficulty=(difficulty or 'expert').lower()
     if difficulty not in PUZZLE_CANDIDATES: difficulty='expert'
     target=person(TARGET_NAME)
     if not target: raise RuntimeError('Weekly target could not be loaded')
+    # First try the tiny curated alpha pool for this difficulty BEFORE building
+    # the broad live candidate catalog.  The catalog is only needed as fallback;
+    # building it on every cold deploy can add a long delay to a button tap.
+
+    # First try the tiny curated alpha pool for this difficulty. This avoids an
+    # expensive six-degree graph crawl on the request that follows a button tap.
+    # Every step is still checked against live provider credits before serving.
+    curated=CURATED_ALPHA_ROUTES.get(difficulty,[])
+    curated_order=[x for x in curated if x[0] not in USED_STARTERS] or curated
+    for candidate_name,steps in curated_order:
+        candidate=person(candidate_name)
+        if not candidate or str(candidate.get('id'))==str(target.get('id')):
+            continue
+        route=resolve_curated_route(candidate,steps)
+        if not route or not (1 <= len(route) <= 6):
+            continue
+        USED_STARTERS.add(candidate_name); save_used_starters(USED_STARTERS)
+        puzzle_id=secrets.token_urlsafe(12)
+        cut,cut_meta=cut_for(difficulty, route, candidate.get('id'), target.get('id'))
+        route_meta={'status':'verified_route','scope':'curated_live_route','stats':{'steps':len(route)}}
+        PUZZLES[puzzle_id]={
+            'created':time.time(),'difficulty':difficulty,
+            'start':public_person(candidate),'target':public_person(target),
+            'comparison_route':route,'route_status':'verified_route','route_search':route_meta,
+            'cut':cut,'cut_meta':cut_meta,'hints_used':0,'backtracks_used':0,
+            'live_route':[], 'current_actor':public_person(candidate), 'finished':False
+        }
+        save_active_puzzles()
+        return {
+            'puzzle_id':puzzle_id,'difficulty':difficulty,
+            'start':public_person(candidate),'target':public_person(target),'verified':True
+        }
+
+    # Only pay for the broader candidate catalog if every curated route failed.
     names=candidate_names_for(difficulty)
     if not names: raise RuntimeError('No starting-actor candidates available')
     start_at=PUZZLE_CURSOR[difficulty] % len(names)
@@ -465,7 +541,7 @@ def generate_puzzle(difficulty='expert'):
 
     ordered=[names[(start_at+i)%len(names)] for i in range(len(names))]
     fresh=[n for n in ordered if n not in USED_STARTERS]
-    passes=[fresh] if fresh else [ordered]
+    passes=[fresh, ordered] if fresh else [ordered]
     for pass_names in passes:
       for candidate_name in pass_names:
         idx=names.index(candidate_name); candidate=person(candidate_name)
@@ -506,7 +582,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'build':'2026-10-03-fix1','eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-03-v2','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'build':'2026-10-03-fix1','eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
