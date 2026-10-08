@@ -1,41 +1,171 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Actor Connection</title><style>
-:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111;background:#f3f3f3}*{box-sizing:border-box}body{margin:0;background:linear-gradient(#101010 0 230px,#f3f3f3 230px)}.app{max-width:760px;margin:auto;padding:18px}.hero{color:white;padding:8px 0 22px}.hero h1{margin:0;font-size:28px}.hero p{opacity:.75;margin:6px 0}.card{background:#fff;border-radius:20px;padding:20px;margin-bottom:14px;box-shadow:0 8px 30px #00000012}.actors{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center}.person{text-align:center}.pic{width:92px;height:112px;border-radius:16px;object-fit:cover;background:#ddd}.name{font-size:19px;font-weight:800;margin-top:6px}.label{text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:800;color:#777}.vs{font-weight:900;color:#aaa}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;margin-top:18px;border-top:1px solid #eee;padding-top:14px}.stats b{font-size:20px;display:block}.stats span{font-size:11px;color:#777}.field{position:relative;margin-top:12px}.field input{width:100%;font-size:17px;padding:14px;border:1px solid #ccc;border-radius:12px}.drop{position:absolute;z-index:20;left:0;right:0;background:#fff;border:1px solid #ddd;border-radius:12px;max-height:270px;overflow:auto;box-shadow:0 10px 25px #0002}.opt{display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid #eee;cursor:pointer}.opt img{width:38px;height:50px;object-fit:cover;border-radius:7px;background:#ddd}.opt b{display:block}.opt small{color:#777}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.btn{border:0;border-radius:12px;padding:13px;font-weight:800;font-size:15px;cursor:pointer}.primary{background:#111;color:#fff}.secondary{background:#eee}.msg{margin-top:12px;padding:12px;border-radius:12px;font-weight:700}.bad{background:#fff0f0;color:#9d1818}.ok{background:#eaf7ed;color:#176b2c}.hint{background:#fff7d6;color:#6e5500}.route{display:flex;flex-wrap:wrap;gap:7px;align-items:center}.node{background:#eee;border-radius:9px;padding:8px 10px;font-weight:700}.movie{font-size:12px;color:#666}.hidden{display:none}.note{font-size:12px;line-height:1.45;color:#777;margin-top:12px}@media(max-width:520px){.pic{width:74px;height:92px}.name{font-size:16px}.card{padding:16px}}
-</style></head><body><div class="app"><div class="hero"><h1>ACTOR CONNECTION</h1><p>Connect the starting actor to the weekly target in six degrees or fewer.</p></div>
-<section class="card" id="loading"><div class="label">Choose difficulty</div><h2 id="loadTitle">Actor Connection</h2><p id="loadText">Pick a level to start.</p><div class="row"><button class="btn secondary difficulty" data-difficulty="beginner">Beginner</button><button class="btn secondary difficulty" data-difficulty="intermediate">Intermediate</button></div><button class="btn primary difficulty" data-difficulty="expert" style="width:100%;margin-top:10px">Expert</button></section>
-<section class="card hidden" id="game"><div class="actors"><div class="person"><div class="label">Starting actor</div><img class="pic" id="startPic"><div class="name" id="startName"></div></div><div class="vs">→</div><div class="person"><div class="label">Weekly target</div><img class="pic" id="targetPic"><div class="name" id="targetName"></div></div></div><div class="stats"><div><b id="degrees">0</b><span>degrees</span></div><div><b id="left">6</b><span>left</span></div><div><b id="hints">0</b><span>hints</span></div><div><b id="time">00:00</b><span>time</span></div></div></section>
-<section class="card hidden" id="play"><div class="label">Current actor</div><div style="display:flex;align-items:center;gap:12px;margin-top:8px"><img class="pic" id="currentPic" style="width:62px;height:76px"><h2 id="currentName" style="margin:0"></h2></div><div class="field"><input id="movieInput" placeholder="Start typing a movie…" autocomplete="off"><div class="drop hidden" id="movieDrop"></div></div><div class="field"><input id="actorInput" placeholder="Start typing the connecting actor…" autocomplete="off" disabled><div class="drop hidden" id="actorDrop"></div></div><div class="row"><button class="btn primary" id="connect">Make connection</button><button class="btn secondary" id="back">Backtrack</button></div><div class="row"><button class="btn secondary" id="hint1">Hint 1: Movie</button><button class="btn secondary" id="hint2">Hint 2: Actor</button></div><button class="btn secondary" id="giveUp" style="width:100%;margin-top:10px">Give up</button><div id="message"></div></section>
-<section class="card hidden" id="routeCard"><div class="label">Your route</div><div class="route" id="route" style="margin-top:12px"></div></section>
-<section class="card hidden" id="result"><div class="label">Round complete</div><h2 id="resultTitle"></h2><div id="resultText"></div><button class="btn primary" style="margin-top:14px" onclick="location.reload()">Play again</button></section>
-</div><script>
-const IMG='https://image.tmdb.org/t/p/w185',qs=id=>document.getElementById(id);let start,target,current,puzzleId=null,degree=0,hints=0,seconds=0,timer,route=[],selectedMovie,selectedActor,hintedPath=null,movieSeq=0,actorSeq=0;
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Make the Cut</title>
+<style>
+:root{
+  --bg:#05080b;--panel:#0b1117;--panel2:#101822;--line:#263443;--muted:#8c98a5;
+  --text:#f6f7f8;--gold:#d8aa45;--gold2:#f2cf73;--goldsoft:#2f2513;--danger:#b84545;
+  --ok:#5fa975;--radius:18px;--shadow:0 16px 50px #0008;
+  font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(circle at 50% -10%,#18212a 0,#090d12 38%,#05080b 72%);color:var(--text)}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(180deg,#0000 0 70%,#0008),radial-gradient(circle at 50% 0,#d8aa4512,transparent 35%)}
+button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 18px 40px;position:relative;z-index:1}
+.brand{display:flex;align-items:center;justify-content:center;gap:10px;margin:2px 0 20px}.brand h1{margin:0;font-size:clamp(28px,4vw,48px);letter-spacing:.06em;font-weight:900}.brand .cut{color:var(--gold2)}
+.panel{background:linear-gradient(180deg,#0f151cfa,#090e14fa);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.hidden{display:none!important}.eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:800}.gold{color:var(--gold2)}
+#loading{max-width:760px;margin:70px auto 0;padding:28px}.difficulty-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px}.difficulty{padding:16px;border:1px solid #354453;background:#0d141b;color:#dce2e8;border-radius:14px;font-weight:800;cursor:pointer}.difficulty:hover{border-color:var(--gold);color:#fff}.difficulty:disabled{opacity:.45;cursor:default}
+.stage{display:grid;grid-template-columns:1fr 56px 1fr;gap:16px;align-items:stretch}.actor-card{display:grid;grid-template-columns:132px 1fr;min-height:150px;overflow:hidden}.actor-photo{width:100%;height:100%;object-fit:cover;background:#131c24}.actor-copy{padding:22px;display:flex;flex-direction:column;justify-content:center}.actor-copy h2{margin:8px 0 0;font-size:clamp(22px,3vw,34px);line-height:1.02}.arrow{display:grid;place-items:center;font-size:42px;color:var(--gold);opacity:.9}
+.hud{margin-top:14px;padding:14px 18px;display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.hud-item{padding:4px 14px;border-right:1px solid #263443}.hud-item:last-child{border-right:0}.hud b{display:block;font-size:21px}.hud span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.difficulty-badge{border:1px solid var(--gold);color:var(--gold2);border-radius:999px;padding:8px 12px;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;align-self:center;justify-self:end}
+.workspace{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:14px;margin-top:14px}.play{padding:18px}.current-line{display:flex;align-items:center;gap:12px;margin-bottom:12px}.current-line img{width:52px;height:62px;border-radius:10px;object-fit:cover;background:#1b2630}.current-line strong{font-size:18px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}.field{position:relative}.field label{display:block;font-size:12px;color:#b9c2ca;font-weight:800;margin:0 0 7px}.field input{width:100%;background:#081018;color:#fff;border:1px solid #344555;border-radius:13px;padding:15px 14px;outline:none}.field input:focus{border-color:var(--gold);box-shadow:0 0 0 3px #d8aa4520}.field input:disabled{opacity:.45}.drop{position:absolute;z-index:20;top:74px;left:0;right:0;background:#0c131a;border:1px solid #354453;border-radius:13px;max-height:310px;overflow:auto;box-shadow:0 20px 40px #000b}.opt{display:flex;gap:10px;padding:10px;border-bottom:1px solid #1d2a35;cursor:pointer}.opt:hover{background:#111c26}.opt img{width:42px;height:54px;object-fit:cover;border-radius:7px;background:#1b2630}.opt b{display:block}.opt small{color:var(--muted)}
+.actions{display:grid;grid-template-columns:1.4fr .8fr .8fr .7fr;gap:10px;margin-top:14px}.btn{border-radius:12px;padding:14px;border:1px solid #344555;background:#111922;color:#e7ebef;font-weight:850;cursor:pointer}.btn:hover{border-color:#52677a}.primary{background:linear-gradient(180deg,var(--gold2),#c99733);color:#111;border-color:#e8c868}.danger{border-color:#593333;color:#d98d8d;background:#160d0d}.msg{margin-top:12px;padding:12px 14px;border-radius:12px;font-weight:750}.bad{background:#2a1212;color:#efaaaa;border:1px solid #633}.ok{background:#0e2015;color:#a6dfb6;border:1px solid #29573a}.hint{background:#251e0e;color:#e7ca83;border:1px solid #5c4b21}
+.route-panel{padding:18px;min-height:100%}.route-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.route{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.node,.movie{border:1px solid #344555;border-radius:10px;padding:9px 11px}.node{font-weight:850;background:#101923}.movie{font-size:12px;color:#d2b66f;background:#211a0d;border-color:#5b4820}.route .arr{color:var(--gold)}.cut-lock{margin-top:18px;padding:18px;text-align:center;border:1px dashed #394957;border-radius:14px;color:var(--muted)}.cut-lock b{display:block;color:#c8d0d7;margin-bottom:5px}
+.result{padding:24px;margin-top:14px}.result h2{font-size:30px;margin:7px 0 18px}.result-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}.result-stat{background:#0b1218;border:1px solid #273643;border-radius:12px;padding:14px}.result-stat b{display:block;font-size:22px}.result-stat span{font-size:11px;color:var(--muted);text-transform:uppercase}.comparison{margin-top:16px;padding:14px;border-radius:12px;background:#0b1218;border:1px solid #273643;line-height:1.55}.deep-row{padding:7px 0;border-bottom:1px solid #1d2933}.deep-row:last-child{border-bottom:0}
+@media(max-width:820px){.workspace{grid-template-columns:1fr}.fields{grid-template-columns:1fr}.actions{grid-template-columns:1fr 1fr}.hud{grid-template-columns:repeat(2,1fr)}.difficulty-badge{justify-self:start}.hud-item{border-right:0;border-bottom:1px solid #263443}.stage{grid-template-columns:1fr 34px 1fr}.actor-card{grid-template-columns:100px 1fr}.actor-copy{padding:14px}.actor-copy h2{font-size:20px}}
+@media(max-width:600px){.app{padding:14px 10px 28px}.brand{margin-bottom:14px}.stage{grid-template-columns:1fr 28px 1fr;gap:7px}.actor-card{display:block;min-height:0}.actor-photo{height:140px}.actor-copy{padding:10px}.actor-copy h2{font-size:17px}.eyebrow{font-size:9px}.arrow{font-size:28px}.hud{padding:10px;gap:5px}.hud-item{padding:7px}.hud b{font-size:18px}.difficulty-grid{grid-template-columns:1fr}.actions{grid-template-columns:1fr 1fr}.primary{grid-column:1/-1}.route{font-size:13px}.result-grid{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="brand"><h1>MAKE THE <span class="cut">CUT</span></h1></header>
+
+  <section class="panel" id="loading">
+    <div class="eyebrow gold">Choose difficulty</div>
+    <h2 id="loadTitle">Make the Cut</h2>
+    <p id="loadText">Choose your level to start.</p>
+    <div class="difficulty-grid">
+      <button class="difficulty" data-difficulty="beginner">Beginner</button>
+      <button class="difficulty" data-difficulty="intermediate">Intermediate</button>
+      <button class="difficulty" data-difficulty="expert">Expert</button>
+    </div>
+  </section>
+
+  <main id="gameShell" class="hidden">
+    <section class="stage">
+      <article class="panel actor-card">
+        <img class="actor-photo" id="startPic" alt="Starting actor">
+        <div class="actor-copy"><div class="eyebrow gold">Start</div><h2 id="startName"></h2></div>
+      </article>
+      <div class="arrow">→</div>
+      <article class="panel actor-card">
+        <img class="actor-photo" id="targetPic" alt="Target actor">
+        <div class="actor-copy"><div class="eyebrow gold">Target</div><h2 id="targetName"></h2></div>
+      </article>
+    </section>
+
+    <section class="panel hud">
+      <div class="hud-item"><b id="degrees">0 / 6</b><span>Degrees</span></div>
+      <div class="hud-item"><b id="hints">0</b><span>Hints</span></div>
+      <div class="hud-item"><b id="backs">1</b><span>Free backs</span></div>
+      <div class="hud-item"><b id="time">00:00</b><span>Time</span></div>
+      <div class="difficulty-badge" id="difficultyBadge">Expert</div>
+    </section>
+
+    <section class="workspace">
+      <div class="panel play" id="play">
+        <div class="current-line"><img id="currentPic" alt="Current actor"><div><div class="eyebrow">Current actor</div><strong id="currentName"></strong></div></div>
+        <div class="fields">
+          <div class="field"><label for="movieInput">Movie</label><input id="movieInput" placeholder="Start typing a movie…" autocomplete="off"><div class="drop hidden" id="movieDrop"></div></div>
+          <div class="field"><label for="actorInput">Connecting actor</label><input id="actorInput" placeholder="Start typing the connecting actor…" autocomplete="off" disabled><div class="drop hidden" id="actorDrop"></div></div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="connect">Make Connection →</button>
+          <button class="btn" id="back">Backtrack</button>
+          <button class="btn" id="hint1">Hint 1</button>
+          <button class="btn" id="hint2">Hint 2</button>
+        </div>
+        <button class="btn danger" id="giveUp" style="width:100%;margin-top:10px">Give Up</button>
+        <div id="message"></div>
+      </div>
+
+      <aside class="panel route-panel" id="routeCard">
+        <div class="route-title"><div class="eyebrow gold">Your route</div><div class="eyebrow" id="routeCount">0 connections</div></div>
+        <div class="route" id="route"></div>
+        <div class="cut-lock"><b>THE CUT 🔒</b>Hidden until the round ends.</div>
+      </aside>
+    </section>
+
+    <section class="panel result hidden" id="result">
+      <div class="eyebrow gold">Round complete</div>
+      <h2 id="resultTitle"></h2>
+      <div id="resultText"></div>
+      <button class="btn primary" style="margin-top:18px" onclick="location.reload()">Play Again</button>
+    </section>
+  </main>
+</div>
+<script>
+const IMG='https://image.tmdb.org/t/p/w342';
+const qs=id=>document.getElementById(id);
+let start,target,current,puzzleId=null,degree=0,hints=0,seconds=0,timer,route=[],selectedMovie,selectedActor,movieSeq=0,actorSeq=0,freeBacks=1,difficulty='expert';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function get(url){let r=await fetch(url);let d=await r.json();if(!r.ok||d.error)throw Error(d.error||'Request failed');return d}function img(p){return p?IMG+p:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="185" height="240"><rect width="100%" height="100%" fill="#ddd"/><text x="50%" y="50%" text-anchor="middle" fill="#777" font-size="18">No photo</text></svg>')}async function person(n){return get('/api/person?name='+encodeURIComponent(n))}async function movieSearch(q){return get('/api/autocomplete/movies?puzzle_id='+encodeURIComponent(puzzleId)+'&q='+encodeURIComponent(q))}async function actorSearch(mid,q){return get('/api/autocomplete/actors?puzzle_id='+encodeURIComponent(puzzleId)+'&movie_id='+encodeURIComponent(mid)+'&q='+encodeURIComponent(q))}
-function fmt(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}function stats(){qs('degrees').textContent=degree;qs('left').textContent=6-degree;qs('hints').textContent=hints;qs('time').textContent=fmt(seconds)}function msg(t,c='hint'){qs('message').innerHTML='<div class="msg '+c+'">'+esc(t)+'</div>'}function renderRoute(){qs('route').innerHTML=route.map((r,i)=>(i?' <span>→</span> ':'')+'<span class="node">'+esc(r.actor.name)+'</span>'+(r.movie?' <span class="movie">'+esc(r.movie.title)+'</span>':'')).join('')}
-async function loadCurrent(){selectedMovie=selectedActor=null;hintedPath=null;qs('currentName').textContent=current.name;qs('currentPic').src=img(current.profile_path);qs('movieInput').value='';qs('actorInput').value='';qs('actorInput').disabled=true;qs('movieDrop').classList.add('hidden');qs('actorDrop').classList.add('hidden');stats();renderRoute()}
+const placeholder=()=> 'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="342" height="420"><rect width="100%" height="100%" fill="#18232d"/><circle cx="171" cy="150" r="58" fill="#344553"/><rect x="91" y="224" width="160" height="100" rx="50" fill="#344553"/></svg>');
+function img(p){return p?IMG+p:placeholder()}
+async function get(url){const r=await fetch(url,{cache:'no-store'});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'Request failed');return d}
+async function movieSearch(q){return get('/api/autocomplete/movies?puzzle_id='+encodeURIComponent(puzzleId)+'&q='+encodeURIComponent(q))}
+async function actorSearch(mid,q){return get('/api/autocomplete/actors?puzzle_id='+encodeURIComponent(puzzleId)+'&movie_id='+encodeURIComponent(mid)+'&q='+encodeURIComponent(q))}
+function fmt(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
+function stats(){qs('degrees').textContent=degree+' / 6';qs('hints').textContent=hints;qs('backs').textContent=freeBacks;qs('time').textContent=fmt(seconds);qs('routeCount').textContent=degree+' connection'+(degree===1?'':'s')}
+function msg(t,c='hint'){qs('message').innerHTML='<div class="msg '+c+'">'+esc(t)+'</div>'}
+function renderRoute(){qs('route').innerHTML=route.map((r,i)=>{
+  let s=(i?'<span class="arr">→</span> ':'')+'<span class="node">'+esc(r.actor.name)+'</span>';
+  if(r.movie)s+=' <span class="movie">'+esc(r.movie.title)+'</span>';
+  return s;
+}).join('')}
+async function loadCurrent(){selectedMovie=selectedActor=null;qs('currentName').textContent=current.name;qs('currentPic').src=img(current.profile_path);qs('movieInput').value='';qs('actorInput').value='';qs('actorInput').disabled=true;qs('movieDrop').classList.add('hidden');qs('actorDrop').classList.add('hidden');stats();renderRoute()}
 function showDrop(el,items,kind){if(!items.length){el.classList.add('hidden');return}el.innerHTML=items.slice(0,12).map((x,i)=>'<div class="opt" data-i="'+i+'"><img src="'+img(kind==='movie'?x.poster_path:x.profile_path)+'"><div><b>'+esc(kind==='movie'?x.title:x.name)+'</b><small>'+(kind==='movie'?esc((x.release_date||'').slice(0,4)):esc(x.character||''))+'</small></div></div>').join('');el.classList.remove('hidden');[...el.children].forEach((n,i)=>n.onclick=()=>kind==='movie'?chooseMovie(items[i]):chooseActor(items[i]))}
-qs('movieInput').oninput=async()=>{let q=qs('movieInput').value.trim();selectedMovie=selectedActor=null;qs('actorInput').disabled=true;qs('actorDrop').classList.add('hidden');let seq=++movieSeq;if(!q){showDrop(qs('movieDrop'),[],'movie');return}try{let matches=await movieSearch(q);if(seq===movieSeq)showDrop(qs('movieDrop'),matches,'movie')}catch(e){if(seq===movieSeq)showDrop(qs('movieDrop'),[],'movie')}};async function chooseMovie(m){selectedMovie=m;selectedActor=null;qs('movieInput').value=m.title;qs('movieDrop').classList.add('hidden');qs('actorInput').disabled=false;qs('actorInput').value='';qs('actorInput').focus()}qs('actorInput').oninput=async()=>{let q=qs('actorInput').value.trim();selectedActor=null;let seq=++actorSeq;if(!q||!selectedMovie){showDrop(qs('actorDrop'),[],'actor');return}try{let matches=await actorSearch(selectedMovie.id,q);if(seq===actorSeq)showDrop(qs('actorDrop'),matches,'actor')}catch(e){if(seq===actorSeq)showDrop(qs('actorDrop'),[],'actor')}};function chooseActor(a){selectedActor=a;qs('actorInput').value=a.name;qs('actorDrop').classList.add('hidden')}
+qs('movieInput').oninput=async()=>{let q=qs('movieInput').value.trim();selectedMovie=selectedActor=null;qs('actorInput').disabled=true;qs('actorDrop').classList.add('hidden');let seq=++movieSeq;if(!q){showDrop(qs('movieDrop'),[],'movie');return}try{let matches=await movieSearch(q);if(seq===movieSeq)showDrop(qs('movieDrop'),matches,'movie')}catch(e){if(seq===movieSeq)showDrop(qs('movieDrop'),[],'movie')}};
+async function chooseMovie(m){selectedMovie=m;selectedActor=null;qs('movieInput').value=m.title;qs('movieDrop').classList.add('hidden');qs('actorInput').disabled=false;qs('actorInput').value='';qs('actorInput').focus()}
+qs('actorInput').oninput=async()=>{let q=qs('actorInput').value.trim();selectedActor=null;let seq=++actorSeq;if(!q||!selectedMovie){showDrop(qs('actorDrop'),[],'actor');return}try{let matches=await actorSearch(selectedMovie.id,q);if(seq===actorSeq)showDrop(qs('actorDrop'),matches,'actor')}catch(e){if(seq===actorSeq)showDrop(qs('actorDrop'),[],'actor')}};
+function chooseActor(a){selectedActor=a;qs('actorInput').value=a.name;qs('actorDrop').classList.add('hidden')}
 qs('connect').onclick=async()=>{
   if(!selectedMovie||!selectedActor)return msg('Choose a movie and connecting actor first.','bad');
   try{
     let r=await fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,movie_id:selectedMovie.id,movie_title:selectedMovie.title,next_actor_id:selectedActor.id,actor_name:selectedActor.name})});
-    let d=await r.json(); if(!r.ok)throw Error(d.error||'Validation failed');
-    if(!d.valid)return msg('Invalid connection','bad');
-    degree=d.degrees; current=d.current_actor;
-    route.push({actor:current,movie:{id:selectedMovie.id,title:selectedMovie.title}});
-    msg('Connection accepted.','ok');
+    let d=await r.json();if(!r.ok)throw Error(d.error||'Validation failed');if(!d.valid)return msg('Invalid connection','bad');
+    degree=d.degrees;current=d.current_actor;route.push({actor:current,movie:{id:selectedMovie.id,title:selectedMovie.title}});msg('Connection accepted.','ok');
     if(String(current.id)===String(target.id))return await finishRound(true);
     if(degree>=6)return await finishRound(false);
-    await loadCurrent();
-    if(d.dead_end){
-      msg('DEAD END — No verified route reaches the target within your remaining connections. Backtrack or give up.','bad');
-    }
+    await loadCurrent();if(d.dead_end)msg('DEAD END — No verified route reaches the target within your remaining connections. Backtrack or give up.','bad');
   }catch(e){msg(e.message||'Could not validate connection.','bad')}
 };
 qs('back').onclick=async()=>{
   if(route.length<=1)return msg('You are already at the starting actor.','bad');
-  try{let r=await fetch('/api/backtrack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId})});let d=await r.json();if(!r.ok)throw Error(d.error||'Backtrack failed');route.pop();degree=d.degrees;current=d.current_actor;hintedPath=null;msg('Backtracked. '+d.backtracks_used+' used • '+d.free_backs+' free • penalty '+(d.backtrack_penalty?'-'+d.backtrack_penalty:'0')+'.');await loadCurrent()}catch(e){msg(e.message,'bad')}
+  try{let r=await fetch('/api/backtrack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId})});let d=await r.json();if(!r.ok)throw Error(d.error||'Backtrack failed');route.pop();degree=d.degrees;current=d.current_actor;freeBacks=d.free_backs??freeBacks;await loadCurrent();msg('Backtracked. '+d.backtracks_used+' used • '+d.free_backs+' free • penalty '+(d.backtrack_penalty?'-'+d.backtrack_penalty:'0')+'.')}catch(e){msg(e.message,'bad')}
 };
-async function finishRound(solved,gaveUp=false){clearInterval(timer);stats();renderRoute();qs('play').classList.add('hidden');qs('result').classList.remove('hidden');let payload={puzzle_id:puzzleId,gave_up:gaveUp};let rr=await fetch('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});let rd=await rr.json();if(!rr.ok)throw Error(rd.error||'Could not verify result');let comparison=(rd.comparison_route||[]).map((x,i)=>(i?' → ':'')+x.movie.title+' → '+x.actor.name).join('');if(rd.solved){qs('resultTitle').textContent='Solved in '+rd.degrees+' degree'+(rd.degrees===1?'':'s');let delta=rd.degrees-rd.cut;let cutText=delta<0?'Beat The Cut by '+Math.abs(delta):(delta===0?'Made The Cut':'Over The Cut by '+delta);let deep=(rd.deep_cut_details||[]).filter(x=>x.bonus>0).map(x=>'<div>'+esc(x.movie)+' → '+esc(x.actor)+' <b>+'+x.bonus+'</b></div>').join('');qs('resultText').innerHTML='<div class="label">YOUR ROUTE</div><p><b>'+rd.degrees+' degrees</b></p><div class="label">THE CUT: '+rd.cut+'</div><p>'+esc(cutText)+'</p><div class="label">SCORE</div><p><b>'+rd.points+' points</b> • '+esc(fmt(Math.round(rd.elapsed_seconds||seconds)))+'</p><div class="label">DEEP CUTS</div><p>+'+(rd.deep_cut_bonus||0)+'</p>'+deep+'<p>Hints: '+rd.hints_used+' (−'+rd.hint_penalty+') • Backtracks: '+rd.backtracks_used+' / '+rd.free_backs+' free (−'+rd.backtrack_penalty+')</p><div class="label">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><p>'+esc(start.name)+(comparison?' → '+esc(comparison):'')+'</p>';}else{qs('resultTitle').textContent=gaveUp?'Round ended':'Six degrees used';qs('resultText').innerHTML='<p>Target not reached.</p>'+(comparison?'<div class="label">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><p>'+esc(start.name)+' → '+esc(comparison)+'</p>':'');}}
-async function hint(level){return get('/api/hint?puzzle_id='+encodeURIComponent(puzzleId)+'&max='+encodeURIComponent(6-degree)+'&level='+level)}qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){msg('Hint unavailable.','bad')}};qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){msg('Hint unavailable.','bad')}};
-async function begin(difficulty){try{qs('loadTitle').textContent='Loading…';qs('loadText').textContent='Verifying a six-degree route before the puzzle starts.';document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);let st=await get('/api/status');if(!st.ready)throw Error('The game server is not configured yet.');let puzzle=await get('/api/puzzle?difficulty='+encodeURIComponent(difficulty));if(!puzzle.verified)throw Error('Puzzle verification failed.');puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;route=[{actor:current,movie:null}];qs('startName').textContent=start.name;qs('targetName').textContent=target.name;qs('startPic').src=img(start.profile_path);qs('targetPic').src=img(target.profile_path);qs('loading').classList.add('hidden');['game','play','routeCard'].forEach(x=>qs(x).classList.remove('hidden'));await loadCurrent();timer=setInterval(()=>{seconds++;stats()},1000)}catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}}document.querySelectorAll('.difficulty').forEach(b=>b.onclick=()=>begin(b.dataset.difficulty));qs('giveUp').onclick=async()=>{if(confirm('Give up this round? Your current route will be submitted and the answer revealed only if the server can verify it.')){try{await finishRound(false,true)}catch(e){msg(e.message,'bad')}}};
-</script></body></html>
+async function hint(level){return get('/api/hint?puzzle_id='+encodeURIComponent(puzzleId)+'&max='+encodeURIComponent(6-degree)+'&level='+level)}
+qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){msg('Hint unavailable.','bad')}};
+qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){msg('Hint unavailable.','bad')}};
+async function finishRound(solved,gaveUp=false){
+  clearInterval(timer);stats();renderRoute();qs('play').classList.add('hidden');qs('result').classList.remove('hidden');
+  let rr=await fetch('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})});let rd=await rr.json();if(!rr.ok)throw Error(rd.error||'Could not verify result');
+  let comparison=(rd.comparison_route||[]).map(x=>x.movie.title+' → '+x.actor.name).join(' → ');
+  if(rd.solved){
+    let delta=rd.degrees-rd.cut;let cutText=delta<0?'Beat The Cut by '+Math.abs(delta):(delta===0?'Made The Cut':'Over The Cut by '+delta);
+    let deep=(rd.deep_cut_details||[]).filter(x=>x.bonus>0).map(x=>'<div class="deep-row">'+esc(x.movie)+' → '+esc(x.actor)+' <b class="gold">+'+x.bonus+'</b></div>').join('')||'<div class="deep-row">No Deep Cut bonus this round.</div>';
+    qs('resultTitle').textContent=cutText;
+    qs('resultText').innerHTML='<div class="result-grid"><div class="result-stat"><b>'+rd.degrees+'</b><span>Your route</span></div><div class="result-stat"><b>'+rd.cut+'</b><span>The Cut</span></div><div class="result-stat"><b>'+rd.points+'</b><span>Score</span></div><div class="result-stat"><b>'+esc(fmt(Math.round(rd.elapsed_seconds||seconds)))+'</b><span>Time</span></div></div><div class="eyebrow gold">Deep Cuts +'+(rd.deep_cut_bonus||0)+'</div>'+deep+'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+(comparison?' → '+esc(comparison):'')+'</div><div style="margin-top:10px;color:var(--muted)">Hints: '+rd.hints_used+' (−'+rd.hint_penalty+') • Backtracks: '+rd.backtracks_used+' / '+rd.free_backs+' free (−'+rd.backtrack_penalty+')</div></div>';
+  }else{
+    qs('resultTitle').textContent=gaveUp?'Round ended':'Over the Cut';
+    qs('resultText').innerHTML='<p>Target not reached.</p>'+(comparison?'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+' → '+esc(comparison)+'</div></div>':'');
+  }
+}
+async function begin(level){
+  difficulty=level;
+  try{
+    qs('loadTitle').textContent='Loading…';qs('loadText').textContent='Verifying a six-degree route before the puzzle starts.';document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);
+    let st=await get('/api/status');if(!st.ready)throw Error('The game server is not configured yet.');
+    let puzzle=await get('/api/puzzle?difficulty='+encodeURIComponent(level));if(!puzzle.verified)throw Error('Puzzle verification failed.');
+    puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;route=[{actor:current,movie:null}];
+    qs('startName').textContent=start.name;qs('targetName').textContent=target.name;qs('startPic').src=img(start.profile_path);qs('targetPic').src=img(target.profile_path);qs('difficultyBadge').textContent=level;
+    qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();timer=setInterval(()=>{seconds++;stats()},1000);
+  }catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}
+}
+document.querySelectorAll('.difficulty').forEach(b=>b.onclick=()=>begin(b.dataset.difficulty));
+qs('giveUp').onclick=async()=>{if(confirm('Give up this round?')){try{await finishRound(false,true)}catch(e){msg(e.message,'bad')}}};
+stats();
+</script>
+</body>
+</html>
