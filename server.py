@@ -8,7 +8,7 @@ ROOT=Path(__file__).resolve().parent
 CACHE_DIR=ROOT/'cache'; CACHE_DIR.mkdir(exist_ok=True)
 TMDB='https://api.themoviedb.org/3'
 TOKEN=os.environ.get('TMDB_API_TOKEN','').strip()
-TARGET_NAME=os.environ.get('WEEKLY_TARGET','Denzel Washington').strip()
+TARGET_NAME=os.environ.get('WEEKLY_TARGET','Morgan Freeman').strip()
 # Demo fallback pool. Live mode discovers a much larger candidate catalog from the provider.
 # A candidate is NEVER served until the route verifier proves a <=6 route.
 PUZZLE_CANDIDATES={
@@ -355,6 +355,11 @@ def connection_deep_cut(movie, movie_cast, current_id, next_id):
             if str(x.get('id'))==str(a.get('id')): return i
         return 99
     buried=max(billing(cur), billing(nxt))
+    # Deep Cut is about an obscure connection, not merely an older or currently
+    # low-popularity movie. If both actors are top-billed, the link is too prominent
+    # to earn an obscurity bonus.
+    if buried <= 3:
+        return 0
     popularity=float(movie.get('popularity') or 0)
     year=0
     try: year=int((movie.get('release_date') or '')[:4])
@@ -439,19 +444,19 @@ def candidate_names_for(difficulty):
 # difficulty selection responsive while the broader graph search remains as a fallback.
 CURATED_ALPHA_ROUTES={
     'beginner':[
-        ('Tom Hanks',[('Philadelphia','Denzel Washington')]),
-        ('Julia Roberts',[('The Pelican Brief','Denzel Washington')]),
-        ('Steve Martin',[('Bringing Down the House','Queen Latifah'),('The Bone Collector','Denzel Washington')]),
+        ('Brad Pitt',[('Se7en','Morgan Freeman')]),
+        ('Tim Robbins',[('The Shawshank Redemption','Morgan Freeman')]),
+        ('Clint Eastwood',[('Million Dollar Baby','Morgan Freeman')]),
     ],
     'intermediate':[
-        ('George Clooney',[("Ocean's Eleven",'Matt Damon'),('Courage Under Fire','Denzel Washington')]),
-        ('Paul Giamatti',[('Cinderella Man','Russell Crowe'),('Virtuosity','Denzel Washington')]),
-        ('Jeff Bridges',[('The Big Lebowski','John Goodman'),('Flight','Denzel Washington')]),
+        ('Ben Affleck',[('The Sum of All Fears','Morgan Freeman')]),
+        ('Jack Nicholson',[('The Bucket List','Morgan Freeman')]),
+        ('Christian Bale',[('The Dark Knight Rises','Morgan Freeman')]),
     ],
     'expert':[
-        ('Michael Shannon',[('Man of Steel','Russell Crowe'),('Virtuosity','Denzel Washington')]),
-        ('John C. Reilly',[('Boogie Nights','Luis Guzman'),('The Bone Collector','Denzel Washington')]),
-        ('Steve Buscemi',[('The Big Lebowski','John Goodman'),('Flight','Denzel Washington')]),
+        ('Casey Affleck',[('Gone Baby Gone','Morgan Freeman')]),
+        ('John Cusack',[('The Contract','Morgan Freeman')]),
+        ('Antonio Banderas',[('The Code','Morgan Freeman')]),
     ],
 }
 
@@ -582,7 +587,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-03-v2','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'build':'2026-10-03-fix1','eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-quick-cut-morgan','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
@@ -711,6 +716,7 @@ class Handler(SimpleHTTPRequestHandler):
                 deep_bonus, deep_details = deep_cut_for_route(puzzle['start']['id'],verified) if solved else (0,[])
                 hints_used=min(2,max(0,int(puzzle.get('hints_used',0) or 0)))
                 hint_penalty=0 if hints_used==0 else (10 if hints_used==1 else 20)
+                quick_cut_bonus=max(0,(int(puzzle.get('cut',3))-len(verified))*25) if solved else 0
                 free_backs=1+(deep_bonus//10)
                 backtracks_used=int(puzzle.get('backtracks_used',0))
                 backtrack_penalty=max(0,backtracks_used-free_backs)*5
@@ -722,7 +728,7 @@ class Handler(SimpleHTTPRequestHandler):
                     puzzle['finished']=True
                     save_game_result(pid,puzzle,verified,solved,gave_up,hints_used,deep_bonus,hint_penalty,points,elapsed,backtrack_penalty)
                     save_active_puzzles()
-                return self.send_json({'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})})
+                return self.send_json({'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})})
             return self.send_json({'error':'Not found'},404)
         except Exception as e: return self.send_json({'error':str(e)},500)
 
