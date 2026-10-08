@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -150,9 +151,10 @@ async function finishRound(solved,gaveUp=false){
   let comparison=(rd.comparison_route||[]).map(x=>x.movie.title+' → '+x.actor.name).join(' → ');
   if(rd.solved){
     let delta=rd.degrees-rd.cut;let cutText=delta<0?'Beat The Cut by '+Math.abs(delta):(delta===0?'Made The Cut':'Over The Cut by '+delta);
+    let quick=rd.quick_cut_bonus??Math.max(0,(rd.cut-rd.degrees)*25);
     let deep=(rd.deep_cut_details||[]).filter(x=>x.bonus>0).map(x=>'<div class="deep-row">'+esc(x.movie)+' → '+esc(x.actor)+' <b class="gold">+'+x.bonus+'</b></div>').join('')||'<div class="deep-row">No Deep Cut bonus this round.</div>';
     qs('resultTitle').textContent=cutText;
-    qs('resultText').innerHTML='<div class="result-grid"><div class="result-stat"><b>'+rd.degrees+'</b><span>Your route</span></div><div class="result-stat"><b>'+rd.cut+'</b><span>The Cut</span></div><div class="result-stat"><b>'+rd.points+'</b><span>Score</span></div><div class="result-stat"><b>'+esc(fmt(Math.round(rd.elapsed_seconds||seconds)))+'</b><span>Time</span></div></div><div class="eyebrow gold">Deep Cuts +'+(rd.deep_cut_bonus||0)+'</div>'+deep+'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+(comparison?' → '+esc(comparison):'')+'</div><div style="margin-top:10px;color:var(--muted)">Hints: '+rd.hints_used+' (−'+rd.hint_penalty+') • Backtracks: '+rd.backtracks_used+' / '+rd.free_backs+' free (−'+rd.backtrack_penalty+')</div></div>';
+    qs('resultText').innerHTML='<div class="result-grid"><div class="result-stat"><b>'+rd.degrees+'</b><span>Your route</span></div><div class="result-stat"><b>'+rd.cut+'</b><span>The Cut</span></div><div class="result-stat"><b>'+rd.points+'</b><span>Score</span></div><div class="result-stat"><b>'+esc(fmt(Math.round(rd.elapsed_seconds||seconds)))+'</b><span>Time</span></div></div><div class="eyebrow gold">Quick Cut +'+quick+'</div><div class="deep-row">'+(quick>0?'Efficiency bonus for finishing '+(rd.cut-rd.degrees)+' under The Cut.':'No Quick Cut bonus this round.')+'</div><div class="eyebrow gold" style="margin-top:14px">Deep Cuts +'+(rd.deep_cut_bonus||0)+'</div>'+deep+'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+(comparison?' → '+esc(comparison):'')+'</div><div style="margin-top:10px;color:var(--muted)">Hints: '+rd.hints_used+' (−'+rd.hint_penalty+') • Backtracks: '+rd.backtracks_used+' / '+rd.free_backs+' free (−'+rd.backtrack_penalty+')</div></div>';
   }else{
     qs('resultTitle').textContent=gaveUp?'Round ended':'Over the Cut';
     qs('resultText').innerHTML='<p>Target not reached.</p>'+(comparison?'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+' → '+esc(comparison)+'</div></div>':'');
