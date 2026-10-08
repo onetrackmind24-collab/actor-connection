@@ -139,10 +139,19 @@ def eligibility_for(mid, actor):
         return {'eligible':bool(rule.get('eligible',False)),
                 'reason':rule.get('reason','curated_override'),
                 'source':rule.get('source'), 'note':rule.get('note')}
-    # TMDB movie cast means an acting credit in a movie. It does NOT reliably
-    # identify end-credit-only/cameo timing, so those edge cases require the
-    # curated override file instead of pretending the provider proves them.
-    return {'eligible':True,'reason':'provider_movie_cast'}
+
+    # Game rule: connections must be acting appearances, not crew credits.
+    # TMDB's /movie/{id}/credits cast list is our starting point, but people whose
+    # primary field is directing/writing can still appear there for cameos or loose
+    # metadata. Require a named on-screen role by default. 'Self', archive footage,
+    # voice roles, and ordinary characters all remain eligible because they carry a
+    # character/role string. Any legitimate edge case with a blank role can be
+    # explicitly allowed in eligibility_overrides.json.
+    character=str(actor.get('character') or '').strip()
+    if not character:
+        return {'eligible':False,'reason':'missing_acting_role'}
+
+    return {'eligible':True,'reason':'provider_movie_cast_with_role'}
 
 def eligible_cast(mid):
     return [a for a in cast(mid) if eligibility_for(mid,a)['eligible']]
@@ -440,7 +449,7 @@ def cut_for(difficulty, route, start_id=None, target_id=None):
         meta['samples']=learn_meta.get('samples',0)
     return cut,meta
 
-def live_candidate_catalog(max_pages=5):
+def live_candidate_catalog(max_pages=20):
     """Return a broad, cached pool of working film actors for live puzzle generation.
 
     We intentionally do not use a tiny hand-written name list in live mode. Provider
@@ -488,55 +497,73 @@ def candidate_names_for(difficulty):
 # a puzzle is served, so the game still validates real movie credits. They keep
 # difficulty selection responsive while the broader graph search remains as a fallback.
 CURATED_ALPHA_ROUTES={
+    # Alpha starter pools intentionally avoid direct co-stars of the weekly target.
+    # Each route is still resolved against live TMDB credits before it can be served.
     'beginner':[
-        ('Brad Pitt',[('Se7en','Morgan Freeman')]),
-        ('Tim Robbins',[('The Shawshank Redemption','Morgan Freeman')]),
-        ('Clint Eastwood',[('Million Dollar Baby','Morgan Freeman')]),
-        ('Tom Cruise',[('Oblivion','Morgan Freeman')]),
-        ('Michael Caine',[('The Dark Knight','Morgan Freeman')]),
-        ('Angelina Jolie',[('Wanted','Morgan Freeman')]),
-        ('Bruce Willis',[('RED','Morgan Freeman')]),
-        ('Robert De Niro',[('Last Vegas','Morgan Freeman')]),
-        ('Denzel Washington',[('Glory','Morgan Freeman')]),
-        ('Matt Damon',[('Invictus','Morgan Freeman')]),
-        ('Keanu Reeves',[('Chain Reaction','Morgan Freeman')]),
-        ('Scarlett Johansson',[('Lucy','Morgan Freeman')]),
+        ('Tom Hanks',[('Apollo 13','Ed Harris'),('Gone Baby Gone','Morgan Freeman')]),
+        ('Julia Roberts',[("Ocean's Eleven",'Brad Pitt'),('Se7en','Morgan Freeman')]),
+        ('George Clooney',[("Ocean's Eleven",'Brad Pitt'),('Se7en','Morgan Freeman')]),
+        ('Leonardo DiCaprio',[('Once Upon a Time... in Hollywood','Brad Pitt'),('Se7en','Morgan Freeman')]),
+        ('Samuel L. Jackson',[('Pulp Fiction','Bruce Willis'),('RED','Morgan Freeman')]),
+        ('Nicolas Cage',[('The Rock','Ed Harris'),('Gone Baby Gone','Morgan Freeman')]),
+        ('Ryan Gosling',[('The Big Short','Brad Pitt'),('Se7en','Morgan Freeman')]),
+        ('Emma Stone',[('Zombieland','Woody Harrelson'),('Now You See Me','Morgan Freeman')]),
+        ('Chris Evans',[('Avengers: Endgame','Scarlett Johansson'),('Lucy','Morgan Freeman')]),
+        ('Robert Downey Jr.',[('Iron Man 2','Scarlett Johansson'),('Lucy','Morgan Freeman')]),
+        ('Harrison Ford',[('The Fugitive','Tommy Lee Jones'),('High Crimes','Morgan Freeman')]),
+        ('Sandra Bullock',[('The Proposal','Ryan Reynolds'),("Hitman's Wife's Bodyguard",'Morgan Freeman')]),
+        ('Mark Wahlberg',[('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Adam Sandler',[('Anger Management','Jack Nicholson'),('The Bucket List','Morgan Freeman')]),
+        ('Bradley Cooper',[('American Hustle','Christian Bale'),('The Dark Knight Rises','Morgan Freeman')]),
+        ('Jennifer Lawrence',[('American Hustle','Christian Bale'),('The Dark Knight Rises','Morgan Freeman')]),
+        ('Johnny Depp',[('Charlie and the Chocolate Factory','Helena Bonham Carter'),('The Dark Knight Rises','Morgan Freeman')]),
+        ('Will Ferrell',[('The Other Guys','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Robin Williams',[('Insomnia','Al Pacino'),('Heat','Robert De Niro'),('Last Vegas','Morgan Freeman')]),
+        ('Kevin Bacon',[('A Few Good Men','Tom Cruise'),('Oblivion','Morgan Freeman')]),
     ],
     'intermediate':[
-        ('Ben Affleck',[('The Sum of All Fears','Morgan Freeman')]),
-        ('Jack Nicholson',[('The Bucket List','Morgan Freeman')]),
-        ('Christian Bale',[('The Dark Knight Rises','Morgan Freeman')]),
-        ('Gene Hackman',[('Unforgiven','Morgan Freeman')]),
-        ('Ashley Judd',[('Kiss the Girls','Morgan Freeman')]),
-        ('Kevin Costner',[('Robin Hood: Prince of Thieves','Morgan Freeman')]),
-        ('Matthew McConaughey',[('Amistad','Morgan Freeman')]),
-        ('Mark Ruffalo',[('Now You See Me','Morgan Freeman')]),
-        ('Jesse Eisenberg',[('Now You See Me','Morgan Freeman')]),
-        ('Woody Harrelson',[('Now You See Me','Morgan Freeman')]),
-        ('Gerard Butler',[('Olympus Has Fallen','Morgan Freeman')]),
-        ('Tommy Lee Jones',[('High Crimes','Morgan Freeman')]),
-        ('Helen Mirren',[('RED','Morgan Freeman')]),
-        ('Dustin Hoffman',[('Outbreak','Morgan Freeman')]),
+        ('Paul Giamatti',[('Cinderella Man','Russell Crowe'),('Virtuosity','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('John C. Reilly',[('Boogie Nights','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Steve Buscemi',[('The Big Lebowski','John Goodman'),('Flight','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Stanley Tucci',[('The Devil Wears Prada','Meryl Streep'),('Lions for Lambs','Tom Cruise'),('Oblivion','Morgan Freeman')]),
+        ('J.K. Simmons',[('The Accountant','Ben Affleck'),('The Sum of All Fears','Morgan Freeman')]),
+        ('John Turturro',[('The Big Lebowski','John Goodman'),('Flight','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Sam Rockwell',[('Iron Man 2','Scarlett Johansson'),('Lucy','Morgan Freeman')]),
+        ('Willem Dafoe',[('Spider-Man','J.K. Simmons'),('The Accountant','Ben Affleck'),('The Sum of All Fears','Morgan Freeman')]),
+        ('Edward Norton',[('The Italian Job','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Jeff Goldblum',[('Jurassic Park','Samuel L. Jackson'),('Pulp Fiction','Bruce Willis'),('RED','Morgan Freeman')]),
+        ('Chris Cooper',[('Adaptation.','Nicolas Cage'),('The Rock','Ed Harris'),('Gone Baby Gone','Morgan Freeman')]),
+        ('Richard Jenkins',[('Step Brothers','Will Ferrell'),('The Other Guys','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('David Strathairn',[('Lincoln','Tommy Lee Jones'),('High Crimes','Morgan Freeman')]),
+        ('Stephen Root',[('No Country for Old Men','Tommy Lee Jones'),('High Crimes','Morgan Freeman')]),
+        ('Jeff Bridges',[('The Big Lebowski','John Goodman'),('Flight','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Paul Rudd',[('Anchorman: The Legend of Ron Burgundy','Will Ferrell'),('The Other Guys','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Philip Seymour Hoffman',[('Boogie Nights','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Don Cheadle',[("Ocean's Eleven",'Brad Pitt'),('Se7en','Morgan Freeman')]),
+        ('Laura Dern',[('Jurassic Park','Samuel L. Jackson'),('Pulp Fiction','Bruce Willis'),('RED','Morgan Freeman')]),
+        ('Woody Allen',[('Antz','Gene Hackman'),('Unforgiven','Morgan Freeman')]),
     ],
     'expert':[
-        ('Casey Affleck',[('Gone Baby Gone','Morgan Freeman')]),
-        ('John Cusack',[('The Contract','Morgan Freeman')]),
-        ('Antonio Banderas',[('Thick as Thieves','Morgan Freeman')]),
-        ('Paz Vega',[('10 Items or Less','Morgan Freeman')]),
-        ('Cary Elwes',[('Kiss the Girls','Morgan Freeman')]),
-        ('Monica Potter',[('Along Came a Spider','Morgan Freeman')]),
-        ('Dylan Baker',[('Along Came a Spider','Morgan Freeman')]),
-        ('Clive Owen',[('Last Knights','Morgan Freeman')]),
-        ('Virginia Madsen',[('The Magic of Belle Isle','Morgan Freeman')]),
-        ('Zach Braff',[('Going in Style','Morgan Freeman')]),
-        ('Christopher Walken',[('The Maiden Heist','Morgan Freeman')]),
-        ('William H. Macy',[('The Maiden Heist','Morgan Freeman')]),
-        ('Minnie Driver',[('Hard Rain','Morgan Freeman')]),
-        ('Christian Slater',[('Hard Rain','Morgan Freeman')]),
-        ('Tea Leoni',[('Deep Impact','Morgan Freeman')]),
-        ('Elijah Wood',[('Deep Impact','Morgan Freeman')]),
-        ('James McAvoy',[('Wanted','Morgan Freeman')]),
-        ('Common',[('Wanted','Morgan Freeman')]),
+        ('Michael Shannon',[('Man of Steel','Russell Crowe'),('Virtuosity','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('David Morse',[('The Negotiator','Samuel L. Jackson'),('Pulp Fiction','Bruce Willis'),('RED','Morgan Freeman')]),
+        ('William H. Macy',[('Boogie Nights','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Clifton Collins Jr.',[('Capote','Philip Seymour Hoffman'),('Boogie Nights','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Stephen Tobolowsky',[('Groundhog Day','Bill Murray'),("Charlie's Angels",'Drew Barrymore'),('Batman Forever','Tommy Lee Jones'),('High Crimes','Morgan Freeman')]),
+        ('Luis Guzman',[('Boogie Nights','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('John Hawkes',[('Lincoln','Tommy Lee Jones'),('High Crimes','Morgan Freeman')]),
+        ('Richard Jenkins',[('Step Brothers','Will Ferrell'),('The Other Guys','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('David Strathairn',[('Lincoln','Tommy Lee Jones'),('High Crimes','Morgan Freeman')]),
+        ('Stephen Root',[('No Country for Old Men','Tommy Lee Jones'),('High Crimes','Morgan Freeman')]),
+        ('Paul Giamatti',[('Cinderella Man','Russell Crowe'),('Virtuosity','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('John C. Reilly',[('Boogie Nights','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Steve Buscemi',[('The Big Lebowski','John Goodman'),('Flight','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('John Turturro',[('The Big Lebowski','John Goodman'),('Flight','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('Willem Dafoe',[('Spider-Man','J.K. Simmons'),('The Accountant','Ben Affleck'),('The Sum of All Fears','Morgan Freeman')]),
+        ('Chris Cooper',[('Adaptation.','Nicolas Cage'),('The Rock','Ed Harris'),('Gone Baby Gone','Morgan Freeman')]),
+        ('Stanley Tucci',[('The Devil Wears Prada','Meryl Streep'),('Lions for Lambs','Tom Cruise'),('Oblivion','Morgan Freeman')]),
+        ('Jeff Goldblum',[('Jurassic Park','Samuel L. Jackson'),('Pulp Fiction','Bruce Willis'),('RED','Morgan Freeman')]),
+        ('Edward Norton',[('The Italian Job','Mark Wahlberg'),('2 Guns','Denzel Washington'),('Glory','Morgan Freeman')]),
+        ('J.K. Simmons',[('The Accountant','Ben Affleck'),('The Sum of All Fears','Morgan Freeman')]),
     ],
 }
 
@@ -572,6 +599,25 @@ def resolve_curated_route(start_person, steps):
         current=public_person(next_actor)
     return route if route and str(current.get('name','')).casefold()==TARGET_NAME.casefold() else None
 
+def has_direct_movie_connection(actor_id, target_id):
+    """One cheap provider query to keep alpha starters from being direct co-stars.
+
+    The game still accepts any legitimate direct connection a player discovers; this
+    filter is only for starter selection so every test round is not a one-move puzzle.
+    """
+    if str(actor_id)==str(target_id):
+        return True
+    if DEMO_MODE:
+        for m in movies(actor_id):
+            if str(target_id) in {str(a.get('id')) for a in eligible_cast(m.get('id'))}:
+                return True
+        return False
+    key=f'direct_{actor_id}_{target_id}'
+    def load():
+        d=tmdb('/discover/movie',{'with_people':f'{actor_id},{target_id}','include_adult':'false','page':1})
+        return bool(d.get('total_results',0) or d.get('results'))
+    return bool(cached(key,load))
+
 def generate_puzzle(difficulty='expert'):
     cleanup_puzzles()
     difficulty=(difficulty or 'expert').lower()
@@ -599,8 +645,13 @@ def generate_puzzle(difficulty='expert'):
         candidate=person(candidate_name)
         if not candidate or str(candidate.get('id'))==str(target.get('id')):
             continue
+        # For the current alpha pool, do not serve a starter who already shares
+        # a movie with the weekly target; otherwise every round collapses to Cut 1.
+        if has_direct_movie_connection(candidate.get('id'),target.get('id')):
+            continue
         route=resolve_curated_route(candidate,steps)
-        if not route or not (1 <= len(route) <= 6):
+        min_len={'beginner':2,'intermediate':2,'expert':3}.get(difficulty,2)
+        if not route or not (min_len <= len(route) <= 6):
             continue
         USED_STARTERS.add(candidate_name); save_used_starters(USED_STARTERS)
         puzzle_id=secrets.token_urlsafe(12)
@@ -628,8 +679,10 @@ def generate_puzzle(difficulty='expert'):
     # A short mathematical route does not disqualify Expert; recognizability is a separate concern.
     def eligible_route(candidate):
         if not candidate or str(candidate.get('id'))==str(target.get('id')): return None
+        if has_direct_movie_connection(candidate.get('id'),target.get('id')): return None
         route,route_meta=find_path_with_meta(candidate.get('id'),target.get('id'),6)
-        if route is None or not (1 <= len(route) <= 6): return None
+        min_len={'beginner':2,'intermediate':2,'expert':3}.get(difficulty,2)
+        if route is None or not (min_len <= len(route) <= 6): return None
         return route,route_meta
 
     ordered=[names[(start_at+i)%len(names)] for i in range(len(names))]
@@ -675,7 +728,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-fast-pool-v2','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-actors-only-v1','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
