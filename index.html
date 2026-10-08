@@ -64,7 +64,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
       <div class="difficulty-badge" id="difficultyBadge">Expert</div>
     </section>
 
-    <section class="workspace">
+    <section class="workspace" id="workspace">
       <div class="panel play" id="play">
         <div class="current-line"><img id="currentPic" alt="Current actor"><div><div class="eyebrow">Current actor</div><strong id="currentName"></strong></div></div>
         <div class="fields">
@@ -109,11 +109,15 @@ async function actorSearch(mid,q){return get('/api/autocomplete/actors?puzzle_id
 function fmt(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
 function stats(){qs('degrees').textContent=degree+' / 6';qs('hints').textContent=hints;qs('backs').textContent=freeBacks;qs('time').textContent=fmt(seconds);qs('routeCount').textContent=degree+' connection'+(degree===1?'':'s')}
 function msg(t,c='hint'){qs('message').innerHTML='<div class="msg '+c+'">'+esc(t)+'</div>'}
-function renderRoute(){qs('route').innerHTML=route.map((r,i)=>{
-  let s=(i?'<span class="arr">→</span> ':'')+'<span class="node">'+esc(r.actor.name)+'</span>';
-  if(r.movie)s+=' <span class="movie">'+esc(r.movie.title)+'</span>';
-  return s;
-}).join('')}
+function renderRoute(){
+  if(!route.length){qs('route').innerHTML='';return}
+  let html='<span class="node">'+esc(route[0].actor.name)+'</span>';
+  for(let i=1;i<route.length;i++){
+    const step=route[i];
+    html+=' <span class="arr">→</span> <span class="movie">'+esc(step.movie?.title||'')+'</span> <span class="arr">→</span> <span class="node">'+esc(step.actor.name)+'</span>';
+  }
+  qs('route').innerHTML=html;
+}
 async function loadCurrent(){selectedMovie=selectedActor=null;qs('currentName').textContent=current.name;qs('currentPic').src=img(current.profile_path);qs('movieInput').value='';qs('actorInput').value='';qs('actorInput').disabled=true;qs('movieDrop').classList.add('hidden');qs('actorDrop').classList.add('hidden');stats();renderRoute()}
 function showDrop(el,items,kind){if(!items.length){el.classList.add('hidden');return}el.innerHTML=items.slice(0,12).map((x,i)=>'<div class="opt" data-i="'+i+'"><img src="'+img(kind==='movie'?x.poster_path:x.profile_path)+'"><div><b>'+esc(kind==='movie'?x.title:x.name)+'</b><small>'+(kind==='movie'?esc((x.release_date||'').slice(0,4)):esc(x.character||''))+'</small></div></div>').join('');el.classList.remove('hidden');[...el.children].forEach((n,i)=>n.onclick=()=>kind==='movie'?chooseMovie(items[i]):chooseActor(items[i]))}
 qs('movieInput').oninput=async()=>{let q=qs('movieInput').value.trim();selectedMovie=selectedActor=null;qs('actorInput').disabled=true;qs('actorDrop').classList.add('hidden');let seq=++movieSeq;if(!q){showDrop(qs('movieDrop'),[],'movie');return}try{let matches=await movieSearch(q);if(seq===movieSeq)showDrop(qs('movieDrop'),matches,'movie')}catch(e){if(seq===movieSeq)showDrop(qs('movieDrop'),[],'movie')}};
@@ -139,8 +143,10 @@ async function hint(level){return get('/api/hint?puzzle_id='+encodeURIComponent(
 qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){msg('Hint unavailable.','bad')}};
 qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){msg('Hint unavailable.','bad')}};
 async function finishRound(solved,gaveUp=false){
-  clearInterval(timer);stats();renderRoute();qs('play').classList.add('hidden');qs('result').classList.remove('hidden');
+  clearInterval(timer);stats();renderRoute();
   let rr=await fetch('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})});let rd=await rr.json();if(!rr.ok)throw Error(rd.error||'Could not verify result');
+  qs('workspace').classList.add('hidden');
+  qs('result').classList.remove('hidden');
   let comparison=(rd.comparison_route||[]).map(x=>x.movie.title+' → '+x.actor.name).join(' → ');
   if(rd.solved){
     let delta=rd.degrees-rd.cut;let cutText=delta<0?'Beat The Cut by '+Math.abs(delta):(delta===0?'Made The Cut':'Over The Cut by '+delta);
@@ -151,6 +157,7 @@ async function finishRound(solved,gaveUp=false){
     qs('resultTitle').textContent=gaveUp?'Round ended':'Over the Cut';
     qs('resultText').innerHTML='<p>Target not reached.</p>'+(comparison?'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+' → '+esc(comparison)+'</div></div>':'');
   }
+  qs('result').scrollIntoView({behavior:'smooth',block:'start'});
 }
 async function begin(level){
   difficulty=level;
