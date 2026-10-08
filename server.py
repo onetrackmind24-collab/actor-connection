@@ -106,16 +106,16 @@ def _median_cut(rows):
     med=float(statistics.median(vals))
     return max(1,min(6,int(med+0.5)))
 
-def learned_cut(difficulty,start_id,target_id):
+def learned_cut(start_id,target_id):
+    """Use real matchup behavior only after enough exact-match solves exist."""
     with sqlite3.connect(RESULTS_DB) as db:
-        matchup=db.execute('SELECT degrees FROM game_results WHERE solved=1 AND start_id=? AND target_id=?',(str(start_id),str(target_id))).fetchall()
-        if len(matchup) >= 10:
-            return _median_cut(matchup), {'source':'matchup_median','samples':len(matchup)}
-        cohort=db.execute('SELECT degrees FROM game_results WHERE solved=1 AND difficulty=?',(difficulty,)).fetchall()
-        if len(cohort) >= 25:
-            return _median_cut(cohort), {'source':'difficulty_median','samples':len(cohort)}
-    seed={'beginner':2,'intermediate':3,'expert':3}.get(difficulty,3)
-    return seed, {'source':'seed','samples':max(len(matchup),len(cohort))}
+        matchup=db.execute(
+            'SELECT degrees FROM game_results WHERE solved=1 AND start_id=? AND target_id=?',
+            (str(start_id),str(target_id))
+        ).fetchall()
+    if len(matchup) >= 10:
+        return _median_cut(matchup), {'source':'matchup_median','samples':len(matchup)}
+    return None, {'source':'provisional','samples':len(matchup)}
 
 def save_game_result(puzzle_id,puzzle,verified,solved,gave_up,hints_used,deep_bonus,hint_penalty,points,elapsed_seconds=None,backtrack_penalty=0):
     row=(str(puzzle_id),int(time.time()),puzzle['difficulty'],str(puzzle['start']['id']),puzzle['start']['name'],str(puzzle['target']['id']),puzzle['target']['name'],int(bool(solved)),int(bool(gave_up)),len(verified) if solved else None,int(puzzle.get('cut',3)),int(hints_used),int(deep_bonus),int(hint_penalty),int(points),float(elapsed_seconds) if elapsed_seconds is not None else None,json.dumps(verified,separators=(',',':')),int(puzzle.get('backtracks_used',0)),int(backtrack_penalty))
@@ -388,12 +388,57 @@ def deep_cut_for_route(start_id, verified):
         total += bonus; cur=nxt
     return min(25,total), details
 
+def provisional_cut_for_route(route, start_id=None):
+    """Estimate competent-player route length from the verified route itself.
+
+    The verified route is the floor, not automatically The Cut. Obscure links can
+    raise the expectation by one or two degrees, but the provisional Cut can never
+    drift more than two above the verified route. Direct, prominent connections stay
+    at 1 instead of inheriting a generic difficulty seed.
+    """
+    distance=max(1,min(6,len(route or [])))
+    obscure_steps=0
+    deep_points=0
+    details=[]
+    if start_id is not None and route:
+        try:
+            deep_points,details=deep_cut_for_route(start_id,route)
+            obscure_steps=sum(1 for d in details if int(d.get('bonus',0) or 0)>0)
+        except Exception:
+            # Cut generation must never make an otherwise valid puzzle fail to load.
+            deep_points,details,obscure_steps=0,[],0
+
+    uplift=0
+    if obscure_steps==1:
+        uplift=1
+        # A single genuinely buried connection can justify a larger gap.
+        if deep_points>=15: uplift=2
+    elif obscure_steps>=2:
+        uplift=2
+
+    cut=max(1,min(6,distance+uplift))
+    return cut,{
+        'source':'provisional_route_model',
+        'samples':0,
+        'verified_distance':distance,
+        'obscure_steps':obscure_steps,
+        'deep_points_on_reference_route':deep_points,
+        'uplift':uplift
+    }
+
 def cut_for(difficulty, route, start_id=None, target_id=None):
-    # The Cut is expected competent-player performance, not mathematical shortest path.
+    # The Cut models expected competent-player performance, not difficulty labels.
+    # Exact matchup data wins once we have enough real solves; until then, derive a
+    # provisional Cut from the verified route and how obscure its connections are.
     if start_id is not None and target_id is not None:
-        return learned_cut(difficulty,start_id,target_id)
-    seed={'beginner':2, 'intermediate':3, 'expert':3}.get(difficulty,3)
-    return seed, {'source':'seed','samples':0}
+        learned,meta=learned_cut(start_id,target_id)
+        if learned is not None:
+            return learned,meta
+    cut,meta=provisional_cut_for_route(route,start_id)
+    if start_id is not None and target_id is not None:
+        _,learn_meta=learned_cut(start_id,target_id)
+        meta['samples']=learn_meta.get('samples',0)
+    return cut,meta
 
 def live_candidate_catalog(max_pages=5):
     """Return a broad, cached pool of working film actors for live puzzle generation.
@@ -587,7 +632,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-quick-cut-morgan','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-matchup-cut-v1','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
