@@ -5,7 +5,10 @@ from pathlib import Path
 from collections import deque
 
 ROOT=Path(__file__).resolve().parent
-CACHE_DIR=ROOT/'cache'; CACHE_DIR.mkdir(exist_ok=True)
+# Keep all mutable state on an explicitly configured persistent volume.
+STATE_DIR=Path(os.environ.get('GAME_DATA_DIR',str(ROOT))).expanduser().resolve()
+STATE_DIR.mkdir(parents=True,exist_ok=True)
+CACHE_DIR=STATE_DIR/'cache'; CACHE_DIR.mkdir(exist_ok=True)
 TMDB='https://api.themoviedb.org/3'
 TOKEN=os.environ.get('TMDB_API_TOKEN','').strip()
 TARGET_NAME=os.environ.get('WEEKLY_TARGET','Morgan Freeman').strip()
@@ -20,14 +23,21 @@ PUZZLE_CURSOR={'beginner':0,'intermediate':0,'expert':0}
 LOCK=threading.Lock()
 MEM={}
 PUZZLES={}
-ACTIVE_PUZZLES_FILE=ROOT/'active_puzzles.json'
+ACTIVE_PUZZLES_FILE=STATE_DIR/'active_puzzles.json'
 TTL=60*60*24*30
 PUZZLE_TTL=60*60*6
 DEV_DIAGNOSTICS=os.environ.get('DEV_DIAGNOSTICS','').strip().lower() in {'1','true','yes'}
-USED_STARTERS_FILE=ROOT/'used_starters.json'
-ELIGIBILITY_FILE=ROOT/'eligibility_overrides.json'
-RESULTS_DB=Path(os.environ.get('RESULTS_DB', str(ROOT/'game_results.sqlite3')))
+USED_STARTERS_FILE=STATE_DIR/'used_starters.json'
+ELIGIBILITY_FILE=STATE_DIR/'eligibility_overrides.json'
+RESULTS_DB=Path(os.environ.get('RESULTS_DB', str(STATE_DIR/'game_results.sqlite3')))
 RESULTS_LOCK=threading.Lock()
+RESULTS_DB.parent.mkdir(parents=True,exist_ok=True)
+# Seed curated data only once; never overwrite persisted user/game state.
+for state_name in ('eligibility_overrides.json','used_starters.json'):
+    destination=STATE_DIR/state_name
+    source=ROOT/state_name
+    if destination!=source and not destination.exists() and source.exists():
+        destination.write_bytes(source.read_bytes())
 
 
 def load_active_puzzles():
@@ -819,7 +829,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-responsive-moves-hints-v3','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-persistent-state-v4','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
