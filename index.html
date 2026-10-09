@@ -151,7 +151,7 @@ function chooseActor(a){selectedActor=a;qs('actorInput').value=a.name;qs('actorD
 qs('connect').onclick=async()=>{
   if(!selectedMovie||!selectedActor)return msg('Choose a movie and connecting actor first.','bad');
   try{
-    let r=await fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,movie_id:selectedMovie.id,movie_title:selectedMovie.title,next_actor_id:selectedActor.id,actor_name:selectedActor.name})});
+    let r=await fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,movie_id:selectedMovie.id,movie_title:selectedMovie.title,next_actor_id:selectedActor.id,actor_name:selectedActor.name,connection_token:selectedActor.connection_token||''})});
     let d=await r.json();if(!r.ok)throw Error(d.error||'Validation failed');if(!d.valid)return msg('Invalid connection','bad');
     degree=d.degrees;current=d.current_actor;route.push({actor:current,movie:{id:selectedMovie.id,title:selectedMovie.title}});msg('Connection accepted.','ok');
     if(String(current.id)===String(target.id))return await finishRound(true);
