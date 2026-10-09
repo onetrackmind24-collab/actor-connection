@@ -156,7 +156,22 @@ function setActorImage(id,path){
   if(!el)return;
   try{el.src=img(path)}catch(_){try{el.src=placeholder()}catch(__){}}
 }
-async function get(url){const r=await fetch(url,{cache:'no-store'});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'Request failed');return d}
+async function get(url){
+  let r;
+  try{r=await fetch(url,{cache:'no-store'})}catch(_){throw Error('Could not reach the game server. Check your connection and retry.')}
+  let d;
+  try{d=await r.json()}catch(_){
+    if(!r.ok)throw Error('Game server temporarily unavailable (HTTP '+r.status+'). Retry in a moment.');
+    throw Error('The game server returned an unreadable response. Retry in a moment.');
+  }
+  if(!r.ok||d.error)throw Error(d.error||'Request failed (HTTP '+r.status+')');
+  return d;
+}
+function hintError(error){
+  const reason=error?.message||'Request failed. Please retry.';
+  if(reason==='No verified hint route found')return 'Could not verify a hint within the search limit. This request added no hint penalty. Backtrack or try another connection.';
+  return 'Hint unavailable: '+reason;
+}
 async function movieSearch(q){return get('/api/autocomplete/movies?puzzle_id='+encodeURIComponent(puzzleId)+'&q='+encodeURIComponent(q))}
 async function actorSearch(mid,q){return get('/api/autocomplete/actors?puzzle_id='+encodeURIComponent(puzzleId)+'&movie_id='+encodeURIComponent(mid)+'&q='+encodeURIComponent(q))}
 function fmt(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
@@ -205,8 +220,8 @@ qs('back').onclick=async()=>{
   try{let r=await fetch('/api/backtrack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId})});let d=await r.json();if(!r.ok)throw Error(d.error||'Backtrack failed');route.pop();degree=d.degrees;current=d.current_actor;freeBacks=d.free_backs??freeBacks;await loadCurrent();msg('Backtracked. '+d.backtracks_used+' used • '+d.free_backs+' free • penalty '+(d.backtrack_penalty?'-'+d.backtrack_penalty:'0')+'.')}catch(e){msg(e.message,'bad')}
 };
 async function hint(level){return get('/api/hint?puzzle_id='+encodeURIComponent(puzzleId)+'&max='+encodeURIComponent(6-degree)+'&level='+level)}
-qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){msg('Hint unavailable.','bad')}};
-qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){msg('Hint unavailable.','bad')}};
+qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){msg(hintError(e),'bad')}};
+qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){msg(hintError(e),'bad')}};
 function shareSummary(result){
   const outcome=result.solved?result.degrees+' / 6 degrees • '+result.points+' points':'Target not reached • '+result.degrees+' / 6 degrees';
   const mode=result.hints_enabled===false?'No hints':result.hints_used+' hint level'+(result.hints_used===1?'':'s')+' used';
