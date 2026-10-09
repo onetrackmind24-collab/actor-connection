@@ -14,7 +14,7 @@
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(circle at 50% -10%,#18212a 0,#090d12 38%,#05080b 72%);color:var(--text)}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(180deg,#0000 0 70%,#0008),radial-gradient(circle at 50% 0,#d8aa4512,transparent 35%)}
 button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 18px 40px;position:relative;z-index:1}
-.brand{display:flex;align-items:center;justify-content:center;gap:10px;margin:2px 0 20px}.brand h1{margin:0;font-size:clamp(28px,4vw,48px);letter-spacing:.06em;font-weight:900}.brand .cut{color:var(--gold2)}
+.brand{display:flex;align-items:center;justify-content:center;gap:10px;margin:2px 0 20px}.brand h1{margin:0;font-size:clamp(28px,4vw,48px);letter-spacing:.06em;font-weight:900}.brand .cut{color:var(--gold2)}.brand h1.logo-title{width:min(100%,460px);line-height:0}.brand-logo{display:block;width:100%;height:auto;border-radius:12px}
 .panel{background:linear-gradient(180deg,#0f151cfa,#090e14fa);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
 .hidden{display:none!important}.eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);font-weight:800}.gold{color:var(--gold2)}
 #loading{max-width:760px;margin:42px auto 0;padding:28px}.landing{max-width:900px;margin:28px auto 0;padding:30px}.landing h2{font-size:clamp(28px,4vw,44px);margin:8px 0 10px}.landing-intro{color:#c3cbd3;max-width:760px;font-size:17px;line-height:1.55}.rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:24px 0}.rule{display:grid;grid-template-columns:42px 1fr;gap:12px;align-items:start;padding:16px;border:1px solid #263443;border-radius:14px;background:#0a1118}.rule>b{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--goldsoft);color:var(--gold2);font-size:17px}.rule span{color:#b9c2ca;line-height:1.45}.rule strong{color:#fff;display:block;margin-bottom:2px}.rules-box{border:1px solid #263443;border-radius:14px;padding:16px 18px;background:#081018}.rules-box div{padding:8px 0;color:#aeb8c2;line-height:1.45;border-bottom:1px solid #1b2731}.rules-box div:last-child{border-bottom:0}.rules-box strong{color:#fff}.landing-start{width:100%;margin-top:18px;font-size:17px}.difficulty small{display:block;color:var(--muted);font-size:11px;font-weight:600;margin-top:5px}.back-home{margin-top:14px;width:100%}.difficulty-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px}.difficulty{padding:16px;border:1px solid #354453;background:#0d141b;color:#dce2e8;border-radius:14px;font-weight:800;cursor:pointer}.difficulty:hover{border-color:var(--gold);color:#fff}.difficulty:disabled{opacity:.45;cursor:default}
@@ -30,7 +30,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 </head>
 <body>
 <div class="app">
-  <header class="brand"><h1>MAKE THE <span class="cut">CUT</span></h1></header>
+  <header class="brand"><h1 class="logo-title"><img class="brand-logo" src="/assets/make-the-cut-logo.png" alt="Make the Cut" width="1964" height="801" fetchpriority="high" decoding="async"></h1></header>
 
   <section class="panel landing hidden" id="challengeInvite">
     <div class="eyebrow gold">Challenge</div>

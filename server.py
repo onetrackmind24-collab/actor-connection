@@ -912,10 +912,39 @@ def known_finish_route(puzzle, current, max_depth):
                 seen.add(neighbor); queue.append((neighbor,path+[step]))
     return None
 
-def bounded_hint_path(current, target, depth, seconds=8):
+def known_bridge_path(puzzle,current,target,depth):
+    """Try shared-film joins to verified route actors before broad graph search."""
+    current=str(current); target=str(target)
+    hubs=[puzzle['target']]+[step['actor'] for step in reversed(puzzle.get('comparison_route') or [])]+[puzzle['start']]
+    current_movies=movies(current)
+    seen=set()
+    for hub in hubs:
+        check_search_budget()
+        aid=str(hub['id'])
+        if aid==current or aid in seen: continue
+        seen.add(aid)
+        tail=known_finish_route(puzzle,aid,depth-1)
+        if tail is None: continue
+        hub_movies={str(m['id']) for m in movies(aid)}
+        for movie in current_movies:
+            check_search_budget()
+            mid=str(movie['id'])
+            if mid not in hub_movies: continue
+            connection=validate_connection(current,mid,aid)
+            if not connection: continue
+            m=connection['movie']
+            step={'movie':{'id':m['id'],'title':m.get('title'),'poster_path':m.get('poster_path')},
+                  'actor':public_person(connection['actor'])}
+            return [step]+tail
+    return None
+
+def bounded_hint_path(current, target, depth, seconds=8, puzzle=None):
     previous=getattr(SEARCH_CONTEXT,'deadline',None)
     SEARCH_CONTEXT.deadline=time.monotonic()+seconds
     try:
+        if puzzle is not None and depth>0:
+            shortcut=known_bridge_path(puzzle,current,target,depth)
+            if shortcut: return shortcut
         return find_path(current,target,depth)
     except (TimeoutError, OSError):
         return None
@@ -934,12 +963,14 @@ def resumable_round(puzzle_id, puzzle):
             'free_backs':1+(deep//10),'challenge_token':puzzle.get('challenge_token'),'challenge_benchmark':puzzle.get('challenge_benchmark'),
             'elapsed_seconds':max(0,int(time.time()-float(puzzle['created'])))}
 
+PUBLIC_FILES={'/':'index.html','/index.html':'index.html','/assets/make-the-cut-logo.png':'assets/make-the-cut-logo.png'}
+
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self,path):
-        # Only the self-contained game page is a public static asset.
-        return str(ROOT/'index.html')
+        # Static files must be explicitly public; never serve arbitrary project state.
+        return str(ROOT/PUBLIC_FILES.get(urllib.parse.urlparse(path).path,'index.html'))
     def do_HEAD(self):
-        if urllib.parse.urlparse(self.path).path not in {'/','/index.html'}:
+        if urllib.parse.urlparse(self.path).path not in PUBLIC_FILES:
             return self.send_error(404)
         return super().do_HEAD()
     def send_json(self,obj,status=200):
@@ -953,7 +984,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-serialized-round-actions-v14','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-logo-hint-bridges-v15','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1053,7 +1084,7 @@ class Handler(SimpleHTTPRequestHandler):
                     if path is None:
                         path=known_finish_route(puzzle,a,depth)
                     if path is None:
-                        path=bounded_hint_path(a,str(puzzle['target']['id']),depth)
+                        path=bounded_hint_path(a,str(puzzle['target']['id']),depth,puzzle=puzzle)
                     if path: hint_routes[a]=path
                 if not path: return self.send_json({'error':'No verified hint route found'},404)
                 first=path[0]
@@ -1064,7 +1095,7 @@ class Handler(SimpleHTTPRequestHandler):
                 out={'level':level,'movie':first['movie']}
                 if level>=2: out['actor']=first['actor']
                 return self.send_json(out)
-            if u.path not in {'/','/index.html'}:
+            if u.path not in PUBLIC_FILES:
                 return self.send_error(404)
             return super().do_GET()
         except Exception as e: return self.send_json({'error':str(e)},500)
