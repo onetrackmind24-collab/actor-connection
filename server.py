@@ -875,7 +875,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-cameo-credit-filter-v8','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-terminal-results-v9','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1048,6 +1048,8 @@ class Handler(SimpleHTTPRequestHandler):
             if self.path=='/api/result':
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
+                if puzzle.get('final_result') is not None:
+                    return self.send_json(puzzle['final_result'])
                 # Final scoring consumes only the server-owned route. Client-submitted route
                 # data is intentionally ignored so browser state cannot manufacture a solve.
                 verified=list(puzzle.get('live_route') or [])
@@ -1055,7 +1057,10 @@ class Handler(SimpleHTTPRequestHandler):
                 cur=str(puzzle['current_actor']['id'])
                 solved=cur==str(puzzle['target']['id'])
                 gave_up=bool(body.get('gave_up',False))
-                comparison=puzzle['comparison_route'] if (solved or gave_up) else None
+                exhausted=len(verified)>=6
+                if not (solved or gave_up or exhausted):
+                    return self.send_json({'error':'Round is still active'},409)
+                comparison=puzzle['comparison_route']
                 proven=puzzle.get('route_status')=='proven_shortest'
                 deep_bonus, deep_details = deep_cut_for_route(puzzle['start']['id'],verified) if solved else (0,[])
                 hints_used=min(2,max(0,int(puzzle.get('hints_used',0) or 0)))
@@ -1068,11 +1073,12 @@ class Handler(SimpleHTTPRequestHandler):
                 # The browser timer is display-only. Persist elapsed time from the server's
                 # puzzle creation timestamp so a modified client cannot submit a fake time.
                 elapsed=max(0.0, time.time()-float(puzzle.get('created',time.time())))
-                if solved or gave_up:
-                    puzzle['finished']=True
-                    save_game_result(pid,puzzle,verified,solved,gave_up,hints_used,deep_bonus,hint_penalty,points,elapsed,backtrack_penalty)
-                    save_active_puzzles()
-                return self.send_json({'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})})
+                result={'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})}
+                puzzle['finished']=True
+                puzzle['final_result']=result
+                save_game_result(pid,puzzle,verified,solved,gave_up,hints_used,deep_bonus,hint_penalty,points,elapsed,backtrack_penalty)
+                save_active_puzzles()
+                return self.send_json(result)
             return self.send_json({'error':'Not found'},404)
         except Exception as e: return self.send_json({'error':str(e)},500)
 
