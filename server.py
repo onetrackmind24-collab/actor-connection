@@ -728,7 +728,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-actors-only-v1','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-validation-fix-v1','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
@@ -802,11 +802,17 @@ class Handler(SimpleHTTPRequestHandler):
                 if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
                 current=str(puzzle['current_actor']['id']); nxt=str(body.get('next_actor_id','')); mid=str(body.get('movie_id',''))
                 if len(puzzle['live_route'])>=6: return self.send_json({'error':'Six-degree limit reached'},409)
-                ids={str(x.get('id')) for x in eligible_cast(mid)}
-                if not(current and nxt and current in ids and nxt in ids and current!=nxt):
-                    return self.send_json({'valid':False,'degrees':len(puzzle['live_route'])})
+                # Validate the current actor from their own movie-cast credits.
+                # `movies(current)` comes from /person/{id}/movie_credits cast entries, so
+                # it already proves the current person acted in the selected movie. Do not
+                # require the movie-level cast row for the current actor to also carry a
+                # nonblank character string; TMDB occasionally leaves that field blank on
+                # legitimate acting credits (which caused valid links such as David Morse
+                # -> The Negotiator -> Samuel L. Jackson to be rejected).
                 m=next((x for x in movies(current) if str(x.get('id'))==mid),None)
                 a=next((x for x in eligible_cast(mid) if str(x.get('id'))==nxt),None)
+                if not(current and nxt and m and a and current!=nxt):
+                    return self.send_json({'valid':False,'degrees':len(puzzle['live_route'])})
                 step={'movie':{'id':m.get('id') if m else mid,'title':m.get('title') if m else body.get('movie_title','')},'actor':public_person(a or {'id':nxt,'name':body.get('actor_name','')})}
                 puzzle['live_route'].append(step); puzzle['current_actor']=step['actor']; puzzle['hint_routes']={}
                 degrees=len(puzzle['live_route']); solved=nxt==str(puzzle['target']['id']); remaining=max(0,6-degrees)
