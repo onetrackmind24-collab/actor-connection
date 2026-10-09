@@ -698,7 +698,7 @@ def has_direct_movie_connection(actor_id, target_id):
         return bool(d.get('total_results',0) or d.get('results'))
     return bool(cached(key,load))
 
-def generate_puzzle(difficulty='expert'):
+def generate_puzzle(difficulty='expert', hints_enabled=True):
     cleanup_puzzles()
     difficulty=(difficulty or 'expert').lower()
     if difficulty not in PUZZLE_CANDIDATES: difficulty='expert'
@@ -738,7 +738,7 @@ def generate_puzzle(difficulty='expert'):
         cut,cut_meta=cut_for(difficulty, route, candidate.get('id'), target.get('id'))
         route_meta={'status':'verified_route','scope':'curated_live_route','stats':{'steps':len(route)}}
         PUZZLES[puzzle_id]={
-            'created':time.time(),'difficulty':difficulty,
+            'created':time.time(),'difficulty':difficulty,'hints_enabled':bool(hints_enabled),
             'start':public_person(candidate),'target':public_person(target),
             'comparison_route':route,'route_status':'verified_route','route_search':route_meta,
             'cut':cut,'cut_meta':cut_meta,'hints_used':0,'backtracks_used':0,
@@ -746,7 +746,7 @@ def generate_puzzle(difficulty='expert'):
         }
         save_active_puzzles()
         return {
-            'puzzle_id':puzzle_id,'difficulty':difficulty,
+            'puzzle_id':puzzle_id,'difficulty':difficulty,'hints_enabled':bool(hints_enabled),
             'start':public_person(candidate),'target':public_person(target),'verified':True
         }
 
@@ -780,7 +780,7 @@ def generate_puzzle(difficulty='expert'):
             route_status=route_meta['status']
             cut,cut_meta=cut_for(difficulty, route, candidate.get('id'), target.get('id'))
             PUZZLES[puzzle_id]={
-                'created':time.time(),'difficulty':difficulty,
+                'created':time.time(),'difficulty':difficulty,'hints_enabled':bool(hints_enabled),
                 'start':public_person(candidate),'target':public_person(target),
                 'comparison_route':route,'route_status':route_status,'route_search':route_meta,
                 'cut':cut,'cut_meta':cut_meta,'hints_used':0,'backtracks_used':0,
@@ -789,7 +789,7 @@ def generate_puzzle(difficulty='expert'):
             save_active_puzzles()
             return {
                 'puzzle_id':puzzle_id,
-                'difficulty':difficulty,
+                'difficulty':difficulty,'hints_enabled':bool(hints_enabled),
                 'start':public_person(candidate),
                 'target':public_person(target),
                 'verified':True,
@@ -852,7 +852,7 @@ def resumable_round(puzzle_id, puzzle):
     """Expose only player-owned progress; keep comparison answers and The Cut hidden."""
     played=list(puzzle.get('live_route') or [])
     deep,_=deep_cut_for_route(puzzle['start']['id'],played)
-    return {'puzzle_id':puzzle_id,'verified':True,'difficulty':puzzle['difficulty'],
+    return {'puzzle_id':puzzle_id,'verified':True,'difficulty':puzzle['difficulty'],'hints_enabled':puzzle.get('hints_enabled',True),
             'start':puzzle['start'],'target':puzzle['target'],
             'current_actor':puzzle['current_actor'],'live_route':played,
             'degrees':len(played),'hints_used':int(puzzle.get('hints_used',0)),
@@ -875,13 +875,13 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-terminal-results-v9','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-no-hints-mode-v10','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
                 return self.send_json(resumable_round(pid,puzzle))
-            if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
+            if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0], hints_enabled=q.get('hints',['on'])[0].lower()!='off'))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
                 pid=q.get('puzzle_id',[''])[0]; term=q.get('q',[''])[0].strip().lower()
@@ -944,6 +944,7 @@ class Handler(SimpleHTTPRequestHandler):
                 pid=q.get('puzzle_id',[''])[0]; level=min(2,max(1,int(q.get('level',['1'])[0])))
                 cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
+                if not puzzle.get('hints_enabled',True): return self.send_json({'error':'Hints are disabled for this round'},403)
                 depth=max(0,6-len(puzzle.get('live_route') or []))
                 if depth==0 or puzzle.get('finished'): return self.send_json({'error':'No moves remaining'},409)
                 a=str(puzzle['current_actor']['id'])
@@ -1073,7 +1074,7 @@ class Handler(SimpleHTTPRequestHandler):
                 # The browser timer is display-only. Persist elapsed time from the server's
                 # puzzle creation timestamp so a modified client cannot submit a fake time.
                 elapsed=max(0.0, time.time()-float(puzzle.get('created',time.time())))
-                result={'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})}
+                result={'hints_enabled':puzzle.get('hints_enabled',True),'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})}
                 puzzle['finished']=True
                 puzzle['final_result']=result
                 save_game_result(pid,puzzle,verified,solved,gave_up,hints_used,deep_bonus,hint_penalty,points,elapsed,backtrack_penalty)

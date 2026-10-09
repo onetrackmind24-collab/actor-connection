@@ -59,6 +59,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
     <div class="eyebrow gold">Choose difficulty</div>
     <h2 id="loadTitle">Choose your level</h2>
     <p id="loadText">The puzzle is verified before play begins.</p>
+    <label style="display:block;margin:16px 0"><input type="checkbox" id="noHints"> Play without hints</label>
     <div class="difficulty-grid">
       <button class="difficulty" data-difficulty="beginner"><strong>Beginner</strong><small>Familiar actors and easier routes</small></button>
       <button class="difficulty" data-difficulty="intermediate"><strong>Intermediate</strong><small>More varied actors and routes</small></button>
@@ -207,15 +208,20 @@ async function finishRound(solved,gaveUp=false){
   }
   qs('result').scrollIntoView({behavior:'smooth',block:'start'});
 }
+function applyHintMode(enabled){
+  for(const id of ['hint1','hint2']){qs(id).disabled=!enabled;qs(id).classList.toggle('hidden',!enabled)}
+  qs('difficultyBadge').textContent=difficulty+(enabled?'':' • No hints');
+}
 async function begin(level){
+  const hintsEnabled=!qs('noHints').checked;
   difficulty=level;
   try{
     qs('loadTitle').textContent='Loading…';qs('loadText').textContent='Verifying a six-degree route before the puzzle starts.';document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);
     let st=await get('/api/status');if(!st.ready)throw Error('The game server is not configured yet.');
-    let puzzle=await get('/api/puzzle?difficulty='+encodeURIComponent(level));if(!puzzle.verified)throw Error('Puzzle verification failed.');
+    let puzzle=await get('/api/puzzle?difficulty='+encodeURIComponent(level)+'&hints='+(hintsEnabled?'on':'off'));if(!puzzle.verified)throw Error('Puzzle verification failed.');
     puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;route=[{actor:current,movie:null}];
     rememberRound(puzzleId);
-    qs('startName').textContent=start.name;qs('targetName').textContent=target.name;setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);qs('difficultyBadge').textContent=level;
+    qs('startName').textContent=start.name;qs('targetName').textContent=target.name;setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);applyHintMode(puzzle.hints_enabled!==false);
     qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();timer=setInterval(()=>{seconds++;stats()},1000);
   }catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}
 }
@@ -245,7 +251,7 @@ async function resumeRound(id){
     route=[{actor:start,movie:null},...(d.live_route||[])];
     qs('startName').textContent=start.name;qs('targetName').textContent=target.name;
     setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);
-    qs('difficultyBadge').textContent=difficulty;
+    applyHintMode(d.hints_enabled!==false);
     qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');
     await loadCurrent();clearInterval(timer);timer=setInterval(()=>{seconds++;stats()},1000);
     msg('Your round has been restored.','ok');
