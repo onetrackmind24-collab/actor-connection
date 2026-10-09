@@ -303,6 +303,7 @@ DEMO_PEOPLE={
  'Jeff Bridges':{'id':'p14','name':'Jeff Bridges','profile_path':None},
  'John Goodman':{'id':'p15','name':'John Goodman','profile_path':None},
  'Steve Buscemi':{'id':'p16','name':'Steve Buscemi','profile_path':None},
+ 'Morgan Freeman':{'id':'p17','name':'Morgan Freeman','profile_path':None},
 }
 DEMO_MOVIES={
  'm1':{'id':'m1','title':'Man of Steel','release_date':'2013-06-14','popularity':100,'poster_path':None,'actors':['Michael Shannon','Russell Crowe','Henry Cavill']},
@@ -317,7 +318,9 @@ DEMO_MOVIES={
  'm10':{'id':'m10','title':'Boogie Nights','release_date':'1997-10-10','popularity':90,'poster_path':None,'actors':['John C. Reilly','Luis Guzman']},
  'm11':{'id':'m11','title':'The Big Lebowski','release_date':'1998-03-06','popularity':95,'poster_path':None,'actors':['Jeff Bridges','John Goodman','Steve Buscemi']},
  'm12':{'id':'m12','title':'Flight','release_date':'2012-11-02','popularity':90,'poster_path':None,'actors':['Denzel Washington','John Goodman']},
+ 'm13':{'id':'m13','title':'Glory','release_date':'1989-12-15','popularity':90,'poster_path':None,'actors':['Denzel Washington','Morgan Freeman']},
 }
+# Glory cast verified against https://www.sonypictures.com/movies/glory
 DEMO_BY_ID={str(v['id']):v for v in DEMO_PEOPLE.values()}
 DEMO_NAME_BY_ID={str(v['id']):k for k,v in DEMO_PEOPLE.items()}
 DEMO_MODE=not bool(TOKEN)
@@ -785,7 +788,7 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
         if has_direct_movie_connection(candidate.get('id'),target.get('id')):
             continue
         route=resolve_curated_route(candidate,steps)
-        min_len={'beginner':2,'intermediate':2,'expert':3}.get(difficulty,2)
+        min_len=2 if DEMO_MODE else {'beginner':2,'intermediate':2,'expert':3}.get(difficulty,2)
         if not route or not (min_len <= len(route) <= 6):
             continue
         USED_STARTERS.add(candidate_name); save_used_starters(USED_STARTERS)
@@ -816,7 +819,7 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
         if not candidate or str(candidate.get('id'))==str(target.get('id')): return None
         if has_direct_movie_connection(candidate.get('id'),target.get('id')): return None
         route,route_meta=find_path_with_meta(candidate.get('id'),target.get('id'),6)
-        min_len={'beginner':2,'intermediate':2,'expert':3}.get(difficulty,2)
+        min_len=2 if DEMO_MODE else {'beginner':2,'intermediate':2,'expert':3}.get(difficulty,2)
         if route is None or not (min_len <= len(route) <= 6): return None
         return route,route_meta
 
@@ -930,7 +933,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-challenge-links-v12','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-demo-default-expert-v13','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
