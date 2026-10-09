@@ -765,7 +765,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-offer-token-v1','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-fast-reference-hints-v2','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
@@ -836,7 +836,17 @@ class Handler(SimpleHTTPRequestHandler):
                 hint_routes=puzzle.setdefault('hint_routes',{})
                 path=hint_routes.get(a)
                 if path is None:
-                    path=find_path(a,str(puzzle['target']['id']),depth)
+                    # Reuse the route already verified at puzzle generation. A fresh
+                    # live graph crawl can take minutes even at the starting actor.
+                    reference=puzzle.get('comparison_route') or []
+                    actors=[str(puzzle['start']['id'])]+[str(step['actor']['id']) for step in reference]
+                    for index,actor_id in enumerate(actors[:-1]):
+                        suffix=reference[index:]
+                        if actor_id==a and len(suffix)<=depth:
+                            path=suffix
+                            break
+                    if path is None:
+                        path=find_path(a,str(puzzle['target']['id']),depth)
                     if path: hint_routes[a]=path
                 if not path: return self.send_json({'error':'No verified hint route found'},404)
                 first=path[0]
