@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import weakref
+from contextlib import nullcontext
 import re, json, os, time, urllib.parse, urllib.request, threading, secrets, datetime, sqlite3, statistics, unicodedata
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -23,6 +25,19 @@ PUZZLE_CURSOR={'beginner':0,'intermediate':0,'expert':0}
 LOCK=threading.Lock()
 MEM={}
 PUZZLES={}
+ROUND_LOCKS=weakref.WeakValueDictionary()
+ROUND_LOCKS_GUARD=threading.Lock()
+STATE_WRITE_LOCK=threading.Lock()
+
+def round_lock(puzzle_id):
+    pid=str(puzzle_id or '')
+    if not pid or pid not in PUZZLES: return nullcontext()
+    with ROUND_LOCKS_GUARD:
+        lock=ROUND_LOCKS.get(pid)
+        if lock is None:
+            lock=threading.RLock();ROUND_LOCKS[pid]=lock
+        return lock
+
 ACTIVE_PUZZLES_FILE=STATE_DIR/'active_puzzles.json'
 TTL=60*60*24*30
 PUZZLE_TTL=60*60*6
@@ -52,9 +67,10 @@ def load_active_puzzles():
 def save_active_puzzles():
     # Atomic replace avoids leaving a half-written session file if the process stops mid-write.
     try:
-        tmp=ACTIVE_PUZZLES_FILE.with_suffix('.tmp')
-        tmp.write_text(json.dumps(PUZZLES,separators=(',',':')))
-        tmp.replace(ACTIVE_PUZZLES_FILE)
+        with STATE_WRITE_LOCK:
+            tmp=ACTIVE_PUZZLES_FILE.with_suffix('.tmp')
+            tmp.write_text(json.dumps(PUZZLES,separators=(',',':')))
+            tmp.replace(ACTIVE_PUZZLES_FILE)
     except Exception:
         pass
 
@@ -931,9 +947,13 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header('Content-Type','application/json'); self.send_header('Cache-Control','no-store')
         self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_GET(self):
+        query=urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        with round_lock(query.get('puzzle_id',[''])[0]):
+            return self.handle_get()
+    def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-demo-default-expert-v13','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-serialized-round-actions-v14','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1050,7 +1070,14 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e: return self.send_json({'error':str(e)},500)
     def do_POST(self):
         try:
-            n=int(self.headers.get('Content-Length','0')); body=json.loads(self.rfile.read(n) or b'{}')
+            n=int(self.headers.get('Content-Length','0'))
+            body=json.loads(self.rfile.read(n) or b'{}')
+            if not isinstance(body,dict): return self.send_json({'error':'Expected a JSON object'},400)
+        except (ValueError,TypeError): return self.send_json({'error':'Invalid JSON request'},400)
+        with round_lock(body.get('puzzle_id')):
+            return self.handle_post(body)
+    def handle_post(self,body):
+        try:
             if self.path in {'/api/validate','/api/move'}:
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 # Legacy stateless validation remains available only when no puzzle is supplied.

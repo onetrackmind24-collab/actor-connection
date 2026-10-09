@@ -172,6 +172,7 @@ function renderRoute(){
   qs('route').innerHTML=html;
 }
 async function loadCurrent(){
+  movieSeq++;actorSeq++;
   selectedMovie=selectedActor=null;
   qs('currentName').textContent=current.name;
   stats();
@@ -335,6 +336,23 @@ async function loadChallenge(token){
   }catch(e){qs('challengeTitle').textContent='Challenge unavailable';qs('challengeDetails').textContent=e.message}
 }
 qs('normalGame').onclick=()=>{activeChallengeToken=null;qs('noHints').disabled=false;history.replaceState(null,'',location.pathname);qs('challengeInvite').classList.add('hidden');qs('landing').classList.remove('hidden')};
+let roundActionBusy=false;
+for(const id of ['connect','back','hint1','hint2','giveUp']){
+  const button=qs(id),action=button.onclick;
+  button.onclick=async(...args)=>{
+    if(roundActionBusy)return;
+    roundActionBusy=true;
+    const controls=['connect','back','hint1','hint2','giveUp'];
+    for(const key of controls)qs(key).disabled=true;
+    qs('movieInput').disabled=true;qs('actorInput').disabled=true;
+    try{return await action(...args)}
+    finally{
+      roundActionBusy=false;
+      for(const key of controls)qs(key).disabled=(key==='hint1'||key==='hint2')&&qs(key).classList.contains('hidden');
+      qs('movieInput').disabled=false;qs('actorInput').disabled=!selectedMovie;
+    }
+  };
+}
 const inviteToken=new URLSearchParams(location.search).get('challenge');
 const savedRound=rememberedRound();if(inviteToken)loadChallenge(inviteToken);else if(savedRound)resumeRound(savedRound);
 </script>
