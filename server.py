@@ -820,8 +820,12 @@ def bounded_hint_path(current, target, depth, seconds=8):
 
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self,path):
-        rel=urllib.parse.urlparse(path).path.lstrip('/') or 'index.html'
-        return str(ROOT/rel)
+        # Only the self-contained game page is a public static asset.
+        return str(ROOT/'index.html')
+    def do_HEAD(self):
+        if urllib.parse.urlparse(self.path).path not in {'/','/index.html'}:
+            return self.send_error(404)
+        return super().do_HEAD()
     def send_json(self,obj,status=200):
         data=json.dumps(obj).encode(); self.send_response(status)
         self.send_header('Content-Type','application/json'); self.send_header('Cache-Control','no-store')
@@ -829,7 +833,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-persistent-state-v4-retention-check','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-private-project-files-v5','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
@@ -924,6 +928,8 @@ class Handler(SimpleHTTPRequestHandler):
                 out={'level':level,'movie':first['movie']}
                 if level>=2: out['actor']=first['actor']
                 return self.send_json(out)
+            if u.path not in {'/','/index.html'}:
+                return self.send_error(404)
             return super().do_GET()
         except Exception as e: return self.send_json({'error':str(e)},500)
     def do_POST(self):
