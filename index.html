@@ -117,7 +117,12 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
       <div class="eyebrow gold">Round complete</div>
       <h2 id="resultTitle"></h2>
       <div id="resultText"></div>
-      <button class="btn primary" style="margin-top:18px" onclick="location.reload()">Play Again</button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:18px">
+        <button class="btn" id="shareResult">Share Result</button>
+        <button class="btn primary" onclick="location.reload()">Play Again</button>
+      </div>
+      <p id="shareStatus" aria-live="polite"></p>
+      <textarea id="shareFallback" class="hidden" aria-label="Result to copy" readonly style="width:100%;min-height:140px"></textarea>
     </section>
   </main>
 </div>
@@ -125,6 +130,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 const IMG='https://image.tmdb.org/t/p/w342';
 const qs=id=>document.getElementById(id);
 let start,target,current,puzzleId=null,degree=0,hints=0,seconds=0,timer,route=[],selectedMovie,selectedActor,movieSeq=0,actorSeq=0,freeBacks=1,difficulty='expert';
+let resultShareText='';
 const ROUND_KEY='make-the-cut-active-round';
 function rememberRound(id){try{if(id)sessionStorage.setItem(ROUND_KEY,id);else sessionStorage.removeItem(ROUND_KEY)}catch(_){}}
 function rememberedRound(){try{return sessionStorage.getItem(ROUND_KEY)}catch(_){return null}}
@@ -189,9 +195,32 @@ qs('back').onclick=async()=>{
 async function hint(level){return get('/api/hint?puzzle_id='+encodeURIComponent(puzzleId)+'&max='+encodeURIComponent(6-degree)+'&level='+level)}
 qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){msg('Hint unavailable.','bad')}};
 qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){msg('Hint unavailable.','bad')}};
+function shareSummary(result){
+  const outcome=result.solved?result.degrees+' / 6 degrees • The Cut '+result.cut+' • '+result.points+' points':'Target not reached • '+result.degrees+' / 6 degrees';
+  const mode=result.hints_enabled===false?'No hints':result.hints_used+' hint level'+(result.hints_used===1?'':'s')+' used';
+  return ['MAKE THE CUT',start.name+' → '+target.name,outcome,difficulty+' • '+mode,'https://actor-connection.onrender.com'].join('\n');
+}
+qs('shareResult').onclick=async()=>{
+  if(!resultShareText)return;
+  const button=qs('shareResult');button.disabled=true;
+  qs('shareStatus').textContent='';
+  try{
+    if(typeof navigator.share==='function'){
+      try{await navigator.share({title:'Make the Cut',text:resultShareText});qs('shareStatus').textContent='Result shared.';return}
+      catch(e){if(e.name==='AbortError')return}
+    }
+    if(navigator.clipboard?.writeText){
+      try{await navigator.clipboard.writeText(resultShareText);qs('shareStatus').textContent='Result copied. Paste it into a message.';return}catch(_){}
+    }
+    const fallback=qs('shareFallback');fallback.value=resultShareText;fallback.classList.remove('hidden');fallback.focus();fallback.select();
+    qs('shareStatus').textContent='Select and copy your result below.';
+  }finally{button.disabled=false}
+};
 async function finishRound(solved,gaveUp=false){
   clearInterval(timer);stats();renderRoute();
   let rr=await fetch('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})});let rd=await rr.json();if(!rr.ok)throw Error(rd.error||'Could not verify result');
+  resultShareText=shareSummary(rd);
+  qs('shareStatus').textContent='';qs('shareFallback').classList.add('hidden');
   rememberRound(null);
   qs('workspace').classList.add('hidden');
   qs('result').classList.remove('hidden');
