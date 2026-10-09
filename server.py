@@ -818,6 +818,18 @@ def bounded_hint_path(current, target, depth, seconds=8):
     finally:
         SEARCH_CONTEXT.deadline=previous
 
+def resumable_round(puzzle_id, puzzle):
+    """Expose only player-owned progress; keep comparison answers and The Cut hidden."""
+    played=list(puzzle.get('live_route') or [])
+    deep,_=deep_cut_for_route(puzzle['start']['id'],played)
+    return {'puzzle_id':puzzle_id,'verified':True,'difficulty':puzzle['difficulty'],
+            'start':puzzle['start'],'target':puzzle['target'],
+            'current_actor':puzzle['current_actor'],'live_route':played,
+            'degrees':len(played),'hints_used':int(puzzle.get('hints_used',0)),
+            'backtracks_used':int(puzzle.get('backtracks_used',0)),
+            'free_backs':1+(deep//10),
+            'elapsed_seconds':max(0,int(time.time()-float(puzzle['created'])))}
+
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self,path):
         # Only the self-contained game page is a public static asset.
@@ -833,7 +845,12 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-private-project-files-v5','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-refresh-recovery-v6','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/round':
+                pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
+                if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
+                if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
+                return self.send_json(resumable_round(pid,puzzle))
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
