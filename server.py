@@ -162,8 +162,9 @@ def eligible_cast(mid):
     return [a for a in cast(mid) if eligibility_for(mid,a)['eligible']]
 
 def movie_credit_for_actor(actor_id, movie_id):
-    """Return the actor's cast credit for movie_id, or None."""
+    """Return an eligible current-actor movie cast credit, or None."""
     aid=str(actor_id); mid=str(movie_id)
+    if not eligibility_for(mid,{'id':aid})['eligible']: return None
     return next((m for m in movies(aid) if str(m.get('id'))==mid), None)
 
 def connection_actor(movie_id, actor_id):
@@ -781,6 +782,16 @@ def generate_puzzle(difficulty='expert'):
     raise RuntimeError('No candidate in this difficulty pool passed the <=6 verification gate')
 
 
+def route_allowed_by_overrides(start_id, route):
+    """Recheck curated exclusions on both sides without a live graph crawl."""
+    current={'id':start_id}
+    for step in route:
+        mid=str(step['movie']['id']); actor=step['actor']
+        if not eligibility_for(mid,current)['eligible'] or not eligibility_for(mid,actor)['eligible']:
+            return False
+        current=actor
+    return True
+
 def known_finish_route(puzzle, current, max_depth):
     """Search only already accepted edges and the verified comparison route.
 
@@ -792,6 +803,9 @@ def known_finish_route(puzzle, current, max_depth):
         previous=puzzle['start']
         for step in route:
             actor=step['actor']
+            if not route_allowed_by_overrides(previous['id'],[step]):
+                previous=actor
+                continue
             graph.setdefault(str(previous['id']),[]).append((str(actor['id']),step))
             reverse={'movie':step['movie'],'actor':previous}
             graph.setdefault(str(actor['id']),[]).append((str(previous['id']),reverse))
@@ -845,7 +859,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-refresh-recovery-v6','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-both-actor-eligibility-v7','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -859,7 +873,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if not term: return self.send_json([])
                 current=str(puzzle['current_actor']['id'])
-                hits=[m for m in movies(current) if term in str(m.get('title','')).lower()]
+                hits=[m for m in movies(current) if term in str(m.get('title','')).lower() and eligibility_for(m.get('id'),{'id':current})['eligible']]
                 return self.send_json([{'id':m.get('id'),'title':m.get('title'),'release_date':m.get('release_date'),'poster_path':m.get('poster_path')} for m in hits[:12]])
             if u.path=='/api/autocomplete/actors':
                 pid=q.get('puzzle_id',[''])[0]; mid=q.get('movie_id',[''])[0]; term=q.get('q',[''])[0].strip().lower()
@@ -921,6 +935,8 @@ class Handler(SimpleHTTPRequestHandler):
                 # to refer to the same route even if the graph/cache changes between clicks.
                 hint_routes=puzzle.setdefault('hint_routes',{})
                 path=hint_routes.get(a)
+                if path is not None and not route_allowed_by_overrides(a,path):
+                    hint_routes.pop(a,None); path=None
                 if path is None:
                     # Reuse the route already verified at puzzle generation. A fresh
                     # live graph crawl can take minutes even at the starting actor.
@@ -928,7 +944,7 @@ class Handler(SimpleHTTPRequestHandler):
                     actors=[str(puzzle['start']['id'])]+[str(step['actor']['id']) for step in reference]
                     for index,actor_id in enumerate(actors[:-1]):
                         suffix=reference[index:]
-                        if actor_id==a and len(suffix)<=depth:
+                        if actor_id==a and len(suffix)<=depth and route_allowed_by_overrides(a,suffix):
                             path=suffix
                             break
                     if path is None:
@@ -966,7 +982,7 @@ class Handler(SimpleHTTPRequestHandler):
                 connection=None
                 if token:
                     offer=(puzzle.get('offered_connections') or {}).get(token)
-                    if offer and str(offer.get('current_actor_id'))==current and str(offer.get('movie_id'))==mid and str(offer.get('next_actor_id'))==nxt:
+                    if offer and str(offer.get('current_actor_id'))==current and str(offer.get('movie_id'))==mid and str(offer.get('next_actor_id'))==nxt and route_allowed_by_overrides(current,[{'movie':{'id':mid},'actor':{'id':nxt}}]):
                         connection={'movie':offer.get('movie') or {},'actor':offer.get('actor') or {}}
                 # Backward-compatible fallback for older clients that do not send a token.
                 if connection is None:
