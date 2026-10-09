@@ -240,11 +240,19 @@ DEMO_BY_ID={str(v['id']):v for v in DEMO_PEOPLE.values()}
 DEMO_NAME_BY_ID={str(v['id']):k for k,v in DEMO_PEOPLE.items()}
 DEMO_MODE=not bool(TOKEN)
 
+SEARCH_CONTEXT=threading.local()
+
+def check_search_budget():
+    deadline=getattr(SEARCH_CONTEXT,'deadline',None)
+    if deadline is not None and time.monotonic()>=deadline:
+        raise TimeoutError('Hint search exceeded its time budget')
+
 def cache_file(key):
     safe=''.join(c if c.isalnum() or c in '-_' else '_' for c in key)
     return CACHE_DIR/(safe+'.json')
 
 def cached(key, loader):
+    check_search_budget()
     now=time.time()
     with LOCK:
         if key in MEM and now-MEM[key][0] < TTL: return MEM[key][1]
@@ -266,7 +274,13 @@ def tmdb(path, params=None):
     url=TMDB+path
     if params: url += '?' + urllib.parse.urlencode(params)
     req=urllib.request.Request(url,headers={'Authorization':'Bearer '+TOKEN,'accept':'application/json','User-Agent':'ActorConnectionPrototype/0.3'})
-    with urllib.request.urlopen(req,timeout=20) as r: return json.load(r)
+    check_search_budget()
+    deadline=getattr(SEARCH_CONTEXT,'deadline',None)
+    timeout=min(20,max(0.1,deadline-time.monotonic())) if deadline is not None else 20
+    with urllib.request.urlopen(req,timeout=timeout) as r:
+        result=json.load(r)
+    check_search_budget()
+    return result
 
 def person(name):
     if DEMO_MODE: return DEMO_PEOPLE.get(name,{})
@@ -304,6 +318,7 @@ def _neighbors(pid, movie_limit=None, cast_limit=None, stats=None):
     if movie_limit is not None: actor_movies=actor_movies[:movie_limit]
     emitted=set()
     for m in actor_movies:
+        check_search_budget()
         mid=str(m.get('id'))
         movie_cast=valid_connection_candidates(pid,mid)
         if cast_limit is not None: movie_cast=movie_cast[:cast_limit]
@@ -325,6 +340,7 @@ def _bounded_bfs(start,target,max_depth,movie_limit,cast_limit):
     q=deque([(str(start),[])])
     seen={str(start)}
     while q:
+        check_search_budget()
         pid,path=q.popleft()
         if len(path)>=max_depth: continue
         stats['actors_expanded'] += 1
@@ -754,6 +770,44 @@ def generate_puzzle(difficulty='expert'):
             }
     raise RuntimeError('No candidate in this difficulty pool passed the <=6 verification gate')
 
+
+def known_finish_route(puzzle, current, max_depth):
+    """Search only already accepted edges and the verified comparison route.
+
+    Reverse played edges let an off-route player return toward a verified finish.
+    This is a normal connection using the same film, not a free backtrack.
+    """
+    graph={}
+    for route in (puzzle.get('comparison_route') or [], puzzle.get('live_route') or []):
+        previous=puzzle['start']
+        for step in route:
+            actor=step['actor']
+            graph.setdefault(str(previous['id']),[]).append((str(actor['id']),step))
+            reverse={'movie':step['movie'],'actor':previous}
+            graph.setdefault(str(actor['id']),[]).append((str(previous['id']),reverse))
+            previous=actor
+    target=str(puzzle['target']['id'])
+    queue=deque([(str(current),[])])
+    seen={str(current)}
+    while queue:
+        actor,path=queue.popleft()
+        if actor==target: return path
+        if len(path)>=max_depth: continue
+        for neighbor,step in graph.get(actor,[]):
+            if neighbor not in seen:
+                seen.add(neighbor); queue.append((neighbor,path+[step]))
+    return None
+
+def bounded_hint_path(current, target, depth, seconds=8):
+    previous=getattr(SEARCH_CONTEXT,'deadline',None)
+    SEARCH_CONTEXT.deadline=time.monotonic()+seconds
+    try:
+        return find_path(current,target,depth)
+    except (TimeoutError, OSError):
+        return None
+    finally:
+        SEARCH_CONTEXT.deadline=previous
+
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self,path):
         rel=urllib.parse.urlparse(path).path.lstrip('/') or 'index.html'
@@ -765,7 +819,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-fast-reference-hints-v2','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-responsive-moves-hints-v3','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
@@ -827,9 +881,10 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({'path':find_path(a,b,depth)})
             if u.path=='/api/hint':
                 pid=q.get('puzzle_id',[''])[0]; level=min(2,max(1,int(q.get('level',['1'])[0])))
-                depth=min(6,max(1,int(q.get('max',['6'])[0])))
                 cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
+                depth=max(0,6-len(puzzle.get('live_route') or []))
+                if depth==0 or puzzle.get('finished'): return self.send_json({'error':'No moves remaining'},409)
                 a=str(puzzle['current_actor']['id'])
                 # Cache the chosen route by current actor so Hint 1 and Hint 2 are guaranteed
                 # to refer to the same route even if the graph/cache changes between clicks.
@@ -846,7 +901,9 @@ class Handler(SimpleHTTPRequestHandler):
                             path=suffix
                             break
                     if path is None:
-                        path=find_path(a,str(puzzle['target']['id']),depth)
+                        path=known_finish_route(puzzle,a,depth)
+                    if path is None:
+                        path=bounded_hint_path(a,str(puzzle['target']['id']),depth)
                     if path: hint_routes[a]=path
                 if not path: return self.send_json({'error':'No verified hint route found'},404)
                 first=path[0]
@@ -894,11 +951,14 @@ class Handler(SimpleHTTPRequestHandler):
                 # is only 'unknown' and must never be presented as a mathematical dead end.
                 viability='solved' if solved else 'unknown'; finish_route=None
                 if not solved and remaining>0:
-                    finish_route,finish_meta=find_path_with_meta(nxt,str(puzzle['target']['id']),remaining)
-                    if finish_route is not None:
+                    finish_route=known_finish_route(puzzle,nxt,remaining)
+                    if finish_route:
                         viability='viable'
-                    elif finish_meta.get('status')=='proven_shortest':
-                        viability='dead_end'
+                        puzzle['hint_routes'][nxt]=finish_route
+                    elif DEMO_MODE:
+                        finish_route,finish_meta=find_path_with_meta(nxt,str(puzzle['target']['id']),remaining)
+                        viability='viable' if finish_route is not None else 'dead_end'
+                    # Live unknown paths never trigger a blocking graph crawl here.
                 elif not solved and remaining==0:
                     viability='dead_end'
                 puzzle['viability']=viability
