@@ -182,7 +182,7 @@ qs('connect').onclick=async()=>{
   try{
     let r=await fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,movie_id:selectedMovie.id,movie_title:selectedMovie.title,next_actor_id:selectedActor.id,actor_name:selectedActor.name,connection_token:selectedActor.connection_token||''})});
     let d=await r.json();if(!r.ok)throw Error(d.error||'Validation failed');if(!d.valid)return msg('Invalid connection','bad');
-    degree=d.degrees;current=d.current_actor;route.push({actor:current,movie:{id:selectedMovie.id,title:selectedMovie.title}});msg('Connection accepted.','ok');
+    degree=d.degrees;current=d.current_actor;freeBacks=d.free_backs??freeBacks;route.push({actor:current,movie:{id:selectedMovie.id,title:selectedMovie.title}});msg('Connection accepted.','ok');
     if(String(current.id)===String(target.id))return await finishRound(true);
     if(degree>=6)return await finishRound(false);
     await loadCurrent();if(d.dead_end)msg('DEAD END — No verified route reaches the target within your remaining connections. Backtrack or give up.','bad');
