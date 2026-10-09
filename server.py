@@ -1017,7 +1017,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-deep-cut-attribution-v18','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-atomic-round-actions-v19','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1169,27 +1169,29 @@ class Handler(SimpleHTTPRequestHandler):
                 m=connection['movie']; a=connection['actor']
                 step={'movie':{'id':m.get('id'),'title':m.get('title') or body.get('movie_title','')},
                       'actor':public_person(a)}
-                puzzle['live_route'].append(step); puzzle['current_actor']=step['actor']; puzzle['hint_routes']={}; puzzle['offered_connections']={}
-                degrees=len(puzzle['live_route']); solved=nxt==str(puzzle['target']['id']); remaining=max(0,6-degrees)
+                # Compute against a proposed snapshot; provider failures must not advance the round.
+                proposed=dict(puzzle,live_route=puzzle['live_route']+[step],current_actor=step['actor'],hint_routes={},offered_connections={})
+                degrees=len(proposed['live_route']); solved=nxt==str(puzzle['target']['id']); remaining=max(0,6-degrees)
                 # Early-failure detection: only declare a DEAD END when the search can actually
                 # prove there is no finish inside the remaining moves. In demo mode the graph is
                 # complete, so a failed BFS is proof. In live provider mode a failed bounded search
                 # is only 'unknown' and must never be presented as a mathematical dead end.
                 viability='solved' if solved else 'unknown'; finish_route=None
                 if not solved and remaining>0:
-                    finish_route=known_finish_route(puzzle,nxt,remaining)
+                    finish_route=known_finish_route(proposed,nxt,remaining)
                     if finish_route:
                         viability='viable'
-                        puzzle['hint_routes'][nxt]=finish_route
+                        proposed['hint_routes'][nxt]=finish_route
                     elif DEMO_MODE:
                         finish_route,finish_meta=find_path_with_meta(nxt,str(puzzle['target']['id']),remaining)
                         viability='viable' if finish_route is not None else 'dead_end'
                     # Live unknown paths never trigger a blocking graph crawl here.
                 elif not solved and remaining==0:
                     viability='dead_end'
-                puzzle['viability']=viability
-                earned_deep,_=deep_cut_for_route(puzzle['start']['id'],puzzle['live_route'])
+                proposed['viability']=viability
+                earned_deep,_=deep_cut_for_route(puzzle['start']['id'],proposed['live_route'])
                 free_backs=1+(earned_deep//10)
+                puzzle.update(proposed)
                 save_active_puzzles()
                 return self.send_json({'valid':True,'degrees':degrees,'remaining':remaining,'current_actor':step['actor'],'solved':solved,'limit_reached':degrees>=6,'free_backs':free_backs,'deep_cut_bank':earned_deep,'viability':viability,'dead_end':viability=='dead_end'})
             if self.path=='/api/backtrack':
@@ -1197,17 +1199,18 @@ class Handler(SimpleHTTPRequestHandler):
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
                 if not puzzle['live_route']: return self.send_json({'error':'Already at starting actor'},409)
-                puzzle['live_route'].pop()
-                puzzle['backtracks_used']=int(puzzle.get('backtracks_used',0))+1
-                puzzle['current_actor']=puzzle['live_route'][-1]['actor'] if puzzle['live_route'] else puzzle['start']
-                puzzle['hint_routes']={}
-                save_active_puzzles()
+                proposed=dict(puzzle,live_route=puzzle['live_route'][:-1],hint_routes={},offered_connections={})
+                proposed['backtracks_used']=int(proposed.get('backtracks_used',0))+1
+                proposed['current_actor']=proposed['live_route'][-1]['actor'] if proposed['live_route'] else proposed['start']
+                proposed['hint_routes']={}
                 # One back is always free. Every 10 Deep Cut points earned on the CURRENT
                 # surviving route earns another free back. Rolled-back Deep Cuts no longer count.
-                earned_deep,_=deep_cut_for_route(puzzle['start']['id'],puzzle['live_route'])
+                earned_deep,_=deep_cut_for_route(proposed['start']['id'],proposed['live_route'])
                 free_backs=1+(earned_deep//10)
-                penalty=max(0,int(puzzle['backtracks_used'])-free_backs)*5
-                return self.send_json({'ok':True,'degrees':len(puzzle['live_route']),'current_actor':puzzle['current_actor'],'backtracks_used':puzzle['backtracks_used'],'free_backs':free_backs,'backtrack_penalty':penalty,'deep_cut_bank':earned_deep})
+                penalty=max(0,int(proposed['backtracks_used'])-free_backs)*5
+                puzzle.update(proposed)
+                save_active_puzzles()
+                return self.send_json({'ok':True,'degrees':len(proposed['live_route']),'current_actor':proposed['current_actor'],'backtracks_used':proposed['backtracks_used'],'free_backs':free_backs,'backtrack_penalty':penalty,'deep_cut_bank':earned_deep})
             if self.path=='/api/result':
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1240,9 +1243,9 @@ class Handler(SimpleHTTPRequestHandler):
                 if puzzle.get('challenge_benchmark') is not None:
                     result['challenge_outcome']=compare_challenge(result,puzzle['challenge_benchmark'])
                 result['challenge_token']=create_challenge(pid,puzzle,result)
+                save_game_result(pid,puzzle,verified,solved,gave_up,hints_used,deep_bonus,hint_penalty,points,elapsed,backtrack_penalty)
                 puzzle['finished']=True
                 puzzle['final_result']=result
-                save_game_result(pid,puzzle,verified,solved,gave_up,hints_used,deep_bonus,hint_penalty,points,elapsed,backtrack_penalty)
                 save_active_puzzles()
                 return self.send_json(result)
             return self.send_json({'error':'Not found'},404)
