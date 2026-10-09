@@ -15,7 +15,7 @@ CACHE_DIR=STATE_DIR/'cache'; CACHE_DIR.mkdir(exist_ok=True)
 TMDB='https://api.themoviedb.org/3'
 TOKEN=os.environ.get('TMDB_API_TOKEN','').strip()
 TARGET_OVERRIDE=os.environ.get('WEEKLY_TARGET','').strip()
-WEEKLY_TARGETS=('Matt Damon','Tom Hanks')
+WEEKLY_TARGETS=('Matt Damon','Tom Hanks','Morgan Freeman','Denzel Washington')
 WEEKLY_ZONE=ZoneInfo('America/New_York')
 WEEKLY_EPOCH=datetime.date(2026,10,5)
 
