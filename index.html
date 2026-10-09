@@ -111,6 +111,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
           <button class="btn" id="hint1">Hint 1</button>
           <button class="btn" id="hint2">Hint 2</button>
         </div>
+        <button class="btn hidden" id="retryResult" style="width:100%;margin-top:10px">Retry result</button>
         <button class="btn danger" id="giveUp" style="width:100%;margin-top:10px">Give Up</button>
         <div id="message"></div>
       </div>
@@ -138,6 +139,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 <script>
 const IMG='https://image.tmdb.org/t/p/w342';
 const qs=id=>document.getElementById(id);
+let pendingFinish=null;
 let start,target,current,puzzleId=null,degree=0,hints=0,seconds=0,timer,route=[],selectedMovie,selectedActor,movieSeq=0,actorSeq=0,freeBacks=1,difficulty='expert';
 let resultShareText='';
 let activeChallengeToken=null;
@@ -156,9 +158,9 @@ function setActorImage(id,path){
   if(!el)return;
   try{el.src=img(path)}catch(_){try{el.src=placeholder()}catch(__){}}
 }
-async function get(url){
+async function get(url,options={}){
   let r;
-  try{r=await fetch(url,{cache:'no-store'})}catch(_){throw Error('Could not reach the game server. Check your connection and retry.')}
+  try{r=await fetch(url,{cache:'no-store',...options})}catch(_){throw Error('Could not reach the game server. Check your connection and retry.')}
   let d;
   try{d=await r.json()}catch(_){
     if(!r.ok)throw Error('Game server temporarily unavailable (HTTP '+r.status+'). Retry in a moment.');
@@ -245,7 +247,11 @@ qs('shareResult').onclick=async()=>{
 };
 async function finishRound(solved,gaveUp=false){
   clearInterval(timer);stats();renderRoute();
-  let rr=await fetch('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})});let rd=await rr.json();if(!rr.ok)throw Error(rd.error||'Could not verify result');
+  pendingFinish={solved,gaveUp};
+  let rd;
+  try{rd=await get('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})})}
+  catch(e){qs('retryResult').classList.remove('hidden');throw Error(e.message+' Your result is pending. Select Retry result.')}
+  pendingFinish=null;qs('retryResult').classList.add('hidden');
   resultShareText=shareSummary(rd);
   qs('shareStatus').textContent='';qs('shareFallback').classList.add('hidden');
   rememberRound(null);
@@ -351,20 +357,21 @@ async function loadChallenge(token){
   }catch(e){qs('challengeTitle').textContent='Challenge unavailable';qs('challengeDetails').textContent=e.message}
 }
 qs('normalGame').onclick=()=>{activeChallengeToken=null;qs('noHints').disabled=false;history.replaceState(null,'',location.pathname);qs('challengeInvite').classList.add('hidden');qs('landing').classList.remove('hidden')};
+qs('retryResult').onclick=async()=>{if(!pendingFinish)return;try{await finishRound(pendingFinish.solved,pendingFinish.gaveUp)}catch(e){msg(e.message,'bad')}};
 let roundActionBusy=false;
-for(const id of ['connect','back','hint1','hint2','giveUp']){
+for(const id of ['connect','back','hint1','hint2','giveUp','retryResult']){
   const button=qs(id),action=button.onclick;
   button.onclick=async(...args)=>{
     if(roundActionBusy)return;
     roundActionBusy=true;
-    const controls=['connect','back','hint1','hint2','giveUp'];
+    const controls=['connect','back','hint1','hint2','giveUp','retryResult'];
     for(const key of controls)qs(key).disabled=true;
     qs('movieInput').disabled=true;qs('actorInput').disabled=true;
     try{return await action(...args)}
     finally{
       roundActionBusy=false;
-      for(const key of controls)qs(key).disabled=(key==='hint1'||key==='hint2')&&qs(key).classList.contains('hidden');
-      qs('movieInput').disabled=false;qs('actorInput').disabled=!selectedMovie;
+      for(const key of controls)qs(key).disabled=(pendingFinish!==null&&key!=='retryResult')||((key==='hint1'||key==='hint2')&&qs(key).classList.contains('hidden'));
+      qs('movieInput').disabled=pendingFinish!==null;qs('actorInput').disabled=pendingFinish!==null||!selectedMovie;
     }
   };
 }
