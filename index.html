@@ -124,6 +124,9 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 const IMG='https://image.tmdb.org/t/p/w342';
 const qs=id=>document.getElementById(id);
 let start,target,current,puzzleId=null,degree=0,hints=0,seconds=0,timer,route=[],selectedMovie,selectedActor,movieSeq=0,actorSeq=0,freeBacks=1,difficulty='expert';
+const ROUND_KEY='make-the-cut-active-round';
+function rememberRound(id){try{if(id)sessionStorage.setItem(ROUND_KEY,id);else sessionStorage.removeItem(ROUND_KEY)}catch(_){}}
+function rememberedRound(){try{return sessionStorage.getItem(ROUND_KEY)}catch(_){return null}}
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const placeholder=()=> 'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="342" height="420"><rect width="100%" height="100%" fill="#18232d"/><circle cx="171" cy="150" r="58" fill="#344553"/><rect x="91" y="224" width="160" height="100" rx="50" fill="#344553"/></svg>');
 function img(p){
@@ -188,6 +191,7 @@ qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await
 async function finishRound(solved,gaveUp=false){
   clearInterval(timer);stats();renderRoute();
   let rr=await fetch('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})});let rd=await rr.json();if(!rr.ok)throw Error(rd.error||'Could not verify result');
+  rememberRound(null);
   qs('workspace').classList.add('hidden');
   qs('result').classList.remove('hidden');
   let comparison=(rd.comparison_route||[]).map(x=>x.movie.title+' → '+x.actor.name).join(' → ');
@@ -210,6 +214,7 @@ async function begin(level){
     let st=await get('/api/status');if(!st.ready)throw Error('The game server is not configured yet.');
     let puzzle=await get('/api/puzzle?difficulty='+encodeURIComponent(level));if(!puzzle.verified)throw Error('Puzzle verification failed.');
     puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;route=[{actor:current,movie:null}];
+    rememberRound(puzzleId);
     qs('startName').textContent=start.name;qs('targetName').textContent=target.name;setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);qs('difficultyBadge').textContent=level;
     qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();timer=setInterval(()=>{seconds++;stats()},1000);
   }catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}
@@ -219,6 +224,40 @@ qs('backToRules').onclick=()=>{qs('loading').classList.add('hidden');qs('landing
 document.querySelectorAll('.difficulty').forEach(b=>b.onclick=()=>begin(b.dataset.difficulty));
 qs('giveUp').onclick=async()=>{if(confirm('Give up this round?')){try{await finishRound(false,true)}catch(e){msg(e.message,'bad')}}};
 stats();
+async function resumeRound(id){
+  qs('landing').classList.add('hidden');qs('loading').classList.remove('hidden');
+  qs('loadTitle').textContent='Restoring your round…';
+  qs('loadText').textContent='Recovering your saved route and hints.';
+  document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);
+  try{
+    const r=await fetch('/api/round?puzzle_id='+encodeURIComponent(id),{cache:'no-store'});
+    const d=await r.json();
+    if(r.status===404||r.status===409){
+      rememberRound(null);
+      qs('loadTitle').textContent='Choose your level';
+      qs('loadText').textContent=r.status===409?'Your previous round has ended.':'Your previous round expired. Rounds are kept for six hours.';
+      document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);
+      return;
+    }
+    if(!r.ok||d.error)throw Error(d.error||'Could not restore round');
+    puzzleId=d.puzzle_id;start=d.start;target=d.target;current=d.current_actor;difficulty=d.difficulty;
+    degree=d.degrees;hints=d.hints_used;freeBacks=d.free_backs;seconds=Math.floor(d.elapsed_seconds);
+    route=[{actor:start,movie:null},...(d.live_route||[])];
+    qs('startName').textContent=start.name;qs('targetName').textContent=target.name;
+    setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);
+    qs('difficultyBadge').textContent=difficulty;
+    qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');
+    await loadCurrent();clearInterval(timer);timer=setInterval(()=>{seconds++;stats()},1000);
+    msg('Your round has been restored.','ok');
+    if(String(current.id)===String(target.id))await finishRound(true);
+    else if(degree>=6)await finishRound(false);
+  }catch(e){
+    qs('loadTitle').textContent='Could not restore your round';
+    qs('loadText').textContent='Your saved round is kept. Reload to retry, or choose a level to start a new round.';
+    document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);
+  }
+}
+const savedRound=rememberedRound();if(savedRound)resumeRound(savedRound);
 </script>
 </body>
 </html>
