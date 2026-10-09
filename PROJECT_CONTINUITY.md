@@ -108,3 +108,16 @@ Earlier file names such as server-latest.txt do not establish freshness; compare
 
 ## Continuation instructions
 Read this record and current GitHub main before editing. Preserve intended rules and document new decisions here. Verify corrections with actual gameplay and appropriate focused checks. Keep commits recoverable. Obtain the full prior-chat export if exact complete history is required; merge it into this record without losing distinctions between intended, implemented, superseded and unknown details.
+
+## October 9, 2026 verified recovery and responsiveness updates
+Live URL recovered: https://actor-connection.onrender.com.
+Commit 453763bf10c88b52395ab9c628cbac5460007cca added fast verified-reference hints. Live Hint 1/2 returned in approximately 4/3 seconds.
+A complete API round Ryan Gosling -> The Big Short -> Brad Pitt -> Se7en -> Morgan Freeman passed: one free backtrack, replay, two hints, result degrees 2/Cut 2/score 80/penalty 20.
+Alternate-route testing then reproduced a 45-second move timeout: accepted moves were blocked by live viability graph search.
+Commit c611dce8820d53279687231f2bf1e4c5cc0b59e0 deployed build 2026-10-09-responsive-moves-hints-v3.
+- Accepted live moves no longer crawl the graph before replying. Known paths determine viability; unknown stays unknown.
+- Known-path BFS combines comparison route and already accepted movie connections, including reverse connections. Returning to a previous actor through a film consumes a normal degree; it is not a free backtrack. This may give a longer but known valid hint; no claim of shortest route.
+- Hint search uses actual server remaining degrees, then known routes, then an eight-second cooperative live search budget. Failed searches do not incur hint deductions or declare a proven dead end. Network timeout uses remaining budget; this is not a strict hard wall-clock guarantee against arbitrary slow streaming.
+Focused tests passed syntax, off-route bridge, depth limit, timeout handling/context cleanup, and accepted off-route move without live graph crawl.
+Live regression passed Ryan Gosling -> The Nice Guys -> Russell Crowe: move accepted in 5.29 seconds; Hint 1 The Nice Guys in 4.92 seconds; Hint 2 Ryan Gosling in 3.16 seconds. The known finish returns via Ryan then Brad Pitt then Morgan Freeman.
+Remaining: UI end-to-end verification and fallback-search behavior for routes without a known finish inside remaining moves; runtime data durability/backups remain unresolved. Do not claim all bugs fixed.
