@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, time, urllib.parse, urllib.request, threading, secrets, datetime, sqlite3, statistics, unicodedata
+import re, json, os, time, urllib.parse, urllib.request, threading, secrets, datetime, sqlite3, statistics, unicodedata
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from collections import deque
@@ -81,11 +81,16 @@ def load_eligibility_overrides():
     and optional source/note. Provider cast credits are allowed by default; a
     curated deny wins everywhere: validation, graph search, hints and scoring.
     """
-    try:
-        data=json.loads(ELIGIBILITY_FILE.read_text())
-        return data if isinstance(data,dict) else {}
-    except Exception:
-        return {}
+    # Bundled rules update on deployment; disk-backed custom rules remain intact.
+    merged={}
+    for path in dict.fromkeys([ROOT/'eligibility_overrides.json',ELIGIBILITY_FILE]):
+        try:
+            data=json.loads(path.read_text())
+            if isinstance(data,dict):
+                for mid,rules in data.items():
+                    if isinstance(rules,dict): merged.setdefault(str(mid),{}).update(rules)
+        except (OSError,ValueError): pass
+    return merged
 
 ELIGIBILITY_OVERRIDES=load_eligibility_overrides()
 
@@ -156,6 +161,15 @@ def eligibility_for(mid, actor):
     # Crew-only credits live in the separate `crew` array and never reach this
     # function through cast(). Known edge cases (for example an ineligible
     # end-credit-only appearance) are handled with eligibility_overrides.json.
+    role=str(actor.get('character') or '').lower().replace('–','-').replace('—','-')
+    annotations=re.findall(r'[\(\[]([^\)\]]*)[\)\]]',role)
+    if role.strip() in {'cameo','cameo appearance','post-credits scene','mid-credits scene','end-credits scene'}:
+        annotations.append(role)
+    for annotation in annotations:
+        if re.search(r'\b(?:post|mid|end|after)[ -]credits?\b',annotation):
+            return {'eligible':False,'reason':'end_credit_only_label'}
+        if re.search(r'\bcameo\b',annotation):
+            return {'eligible':False,'reason':'cameo_label'}
     return {'eligible':True,'reason':'provider_movie_cast'}
 
 def eligible_cast(mid):
@@ -165,7 +179,9 @@ def movie_credit_for_actor(actor_id, movie_id):
     """Return an eligible current-actor movie cast credit, or None."""
     aid=str(actor_id); mid=str(movie_id)
     if not eligibility_for(mid,{'id':aid})['eligible']: return None
-    return next((m for m in movies(aid) if str(m.get('id'))==mid), None)
+    movie=next((m for m in movies(aid) if str(m.get('id'))==mid), None)
+    if movie is not None and (not eligibility_for(mid,dict(movie,id=aid))['eligible'] or connection_actor(mid,aid) is None): return None
+    return movie
 
 def connection_actor(movie_id, actor_id):
     """Return an eligible movie-cast row for actor_id, or None.
@@ -783,11 +799,11 @@ def generate_puzzle(difficulty='expert'):
 
 
 def route_allowed_by_overrides(start_id, route):
-    """Recheck curated exclusions on both sides without a live graph crawl."""
+    """Recheck both actors against cached/provider credits without a graph crawl."""
     current={'id':start_id}
     for step in route:
         mid=str(step['movie']['id']); actor=step['actor']
-        if not eligibility_for(mid,current)['eligible'] or not eligibility_for(mid,actor)['eligible']:
+        if not validate_connection(current['id'],mid,actor['id']):
             return False
         current=actor
     return True
@@ -859,7 +875,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-both-actor-eligibility-v7','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-cameo-credit-filter-v8','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -873,7 +889,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if not term: return self.send_json([])
                 current=str(puzzle['current_actor']['id'])
-                hits=[m for m in movies(current) if term in str(m.get('title','')).lower() and eligibility_for(m.get('id'),{'id':current})['eligible']]
+                hits=[m for m in movies(current) if term in str(m.get('title','')).lower() and eligibility_for(m.get('id'),dict(m,id=current))['eligible']]
                 return self.send_json([{'id':m.get('id'),'title':m.get('title'),'release_date':m.get('release_date'),'poster_path':m.get('poster_path')} for m in hits[:12]])
             if u.path=='/api/autocomplete/actors':
                 pid=q.get('puzzle_id',[''])[0]; mid=q.get('movie_id',[''])[0]; term=q.get('q',[''])[0].strip().lower()
