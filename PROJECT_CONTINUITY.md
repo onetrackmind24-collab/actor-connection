@@ -229,3 +229,7 @@ Injected-error local HTTP tests passed move and back failures preserving both me
 
 ## October 9 level-loading clapper animation
 User requested moving clackers when choosing a level, authorizing this change after the human-testing pause. Added a gold/navy SVG clapperboard with hinged top-arm CSS animation during difficulty/puzzle loading. Hidden before loading and after success or failure; failed loads re-enable difficulty buttons. Honors prefers-reduced-motion with a stationary board; decorative SVG is hidden from assistive technology and loading region reports aria-busy. Existing approved header logo remains intact. JavaScript syntax and success/error loading lifecycle tests passed. No unrelated gameplay or scoring changes in this commit.
+
+
+## October 9 clapper minimum visibility
+User reported the loading animation disappears too quickly to see. Keep successful level loading visible for at least 2.2 seconds from selection, roughly two full claps. Slow loads receive no additional fixed delay. Errors still display immediately. This only changes the presentation before the round begins; server-authoritative timing is unchanged.

@@ -300,12 +300,14 @@ function applyHintMode(enabled){
 async function begin(level){
   const hintsEnabled=!qs('noHints').checked;
   difficulty=level;
+  const loadingStarted=performance.now();
   qs('levelClapper').classList.remove('hidden');qs('loading').setAttribute('aria-busy','true');
   try{
     qs('loadTitle').textContent='Loading…';qs('loadText').textContent='Verifying a six-degree route before the puzzle starts.';document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);
     let st=await get('/api/status');if(!st.ready)throw Error('The game server is not configured yet.');
     const puzzleUrl=activeChallengeToken?'/api/puzzle?challenge='+encodeURIComponent(activeChallengeToken):'/api/puzzle?difficulty='+encodeURIComponent(level)+'&hints='+(hintsEnabled?'on':'off');
     let puzzle=await get(puzzleUrl);if(!puzzle.verified)throw Error('Puzzle verification failed.');
+    await new Promise(resolve=>setTimeout(resolve,Math.max(0,2200-(performance.now()-loadingStarted))));
     difficulty=puzzle.difficulty||level;challengeBenchmark=puzzle.challenge_benchmark||null;
     puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;route=[{actor:current,movie:null}];
     rememberRound(puzzleId);
