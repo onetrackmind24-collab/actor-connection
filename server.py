@@ -151,6 +151,48 @@ def eligibility_for(mid, actor):
 def eligible_cast(mid):
     return [a for a in cast(mid) if eligibility_for(mid,a)['eligible']]
 
+def movie_credit_for_actor(actor_id, movie_id):
+    """Return the actor's cast credit for movie_id, or None."""
+    aid=str(actor_id); mid=str(movie_id)
+    return next((m for m in movies(aid) if str(m.get('id'))==mid), None)
+
+def connection_actor(movie_id, actor_id):
+    """Return an eligible movie-cast row for actor_id, or None.
+
+    This is the only movie-side eligibility gate used by gameplay, autocomplete,
+    graph expansion, hints, and curated-route validation.
+    """
+    aid=str(actor_id); mid=str(movie_id)
+    return next((a for a in cast(mid)
+                 if str(a.get('id'))==aid and eligibility_for(mid,a)['eligible']), None)
+
+def validate_connection(current_actor_id, movie_id, next_actor_id):
+    """Canonical Actor -> Movie -> Actor validation.
+
+    Rule: the current actor must have the movie in their movie CAST credits; the
+    connecting actor must appear in that movie's CAST array and pass explicit
+    eligibility overrides; the two people must be different. Crew-only credits
+    never qualify because cast() reads only TMDB's cast array.
+    """
+    current=str(current_actor_id); nxt=str(next_actor_id); mid=str(movie_id)
+    if not current or not nxt or not mid or current==nxt:
+        return None
+    movie=movie_credit_for_actor(current,mid)
+    if not movie:
+        return None
+    actor=connection_actor(mid,nxt)
+    if not actor:
+        return None
+    return {'movie':movie,'actor':actor}
+
+def valid_connection_candidates(current_actor_id, movie_id):
+    """Eligible connecting actors for a movie, using the same rule as /api/move."""
+    current=str(current_actor_id); mid=str(movie_id)
+    if not movie_credit_for_actor(current,mid):
+        return []
+    return [a for a in cast(mid)
+            if str(a.get('id'))!=current and eligibility_for(mid,a)['eligible']]
+
 def set_eligibility_override(mid, aid, eligible, reason, source=None, note=None):
     """Internal curation helper; not exposed as a public HTTP endpoint."""
     mid,aid=str(mid),str(aid)
@@ -263,7 +305,7 @@ def _neighbors(pid, movie_limit=None, cast_limit=None, stats=None):
     emitted=set()
     for m in actor_movies:
         mid=str(m.get('id'))
-        movie_cast=eligible_cast(mid)
+        movie_cast=valid_connection_candidates(pid,mid)
         if cast_limit is not None: movie_cast=movie_cast[:cast_limit]
         if stats is not None:
             stats['movies_scanned'] += 1
@@ -585,7 +627,7 @@ def resolve_curated_route(start_person, steps):
         movie=next((m for m in movies(current['id']) if _title_key(m.get('title'))==wanted),None)
         if not movie:
             return None
-        movie_cast=eligible_cast(movie.get('id'))
+        movie_cast=valid_connection_candidates(current['id'],movie.get('id'))
         next_actor=next((a for a in movie_cast if _name_key(a.get('name',''))==_name_key(next_actor_name)),None)
         if not next_actor:
             return None
@@ -723,7 +765,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-credit-fix-v2','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-canonical-validation-v1','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
@@ -740,9 +782,11 @@ class Handler(SimpleHTTPRequestHandler):
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if not term or not mid: return self.send_json([])
                 current=str(puzzle['current_actor']['id'])
-                # Do not expose a cast for an arbitrary movie: it must be one of the current actor's credits.
-                if mid not in {str(m.get('id')) for m in movies(current)}: return self.send_json([])
-                hits=[a for a in eligible_cast(mid) if str(a.get('id'))!=current and term in str(a.get('name','')).lower()]
+                # Autocomplete and move validation deliberately share the exact same
+                # canonical connection rule so the UI can never offer a choice that
+                # /api/move subsequently rejects for eligibility reasons.
+                hits=[a for a in valid_connection_candidates(current,mid)
+                      if term in str(a.get('name','')).lower()]
                 return self.send_json([public_person(a) | {'character':a.get('character','')} for a in hits[:12]])
             if u.path.startswith('/api/person/') and u.path.endswith('/movies'):
                 if not DEV_DIAGNOSTICS: return self.send_json({'error':'Not found'},404)
@@ -791,24 +835,17 @@ class Handler(SimpleHTTPRequestHandler):
                 # Legacy stateless validation remains available only when no puzzle is supplied.
                 if not pid and self.path=='/api/validate':
                     current=str(body.get('current_actor_id','')); nxt=str(body.get('next_actor_id','')); mid=str(body.get('movie_id',''))
-                    ids={str(x.get('id')) for x in eligible_cast(mid)}
-                    return self.send_json({'valid': bool(current and nxt and current in ids and nxt in ids and current!=nxt)})
+                    return self.send_json({'valid': validate_connection(current,mid,nxt) is not None})
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
                 current=str(puzzle['current_actor']['id']); nxt=str(body.get('next_actor_id','')); mid=str(body.get('movie_id',''))
                 if len(puzzle['live_route'])>=6: return self.send_json({'error':'Six-degree limit reached'},409)
-                # Validate the current actor from their own movie-cast credits.
-                # `movies(current)` comes from /person/{id}/movie_credits cast entries, so
-                # it already proves the current person acted in the selected movie. Do not
-                # require the movie-level cast row for the current actor to also carry a
-                # nonblank character string; TMDB occasionally leaves that field blank on
-                # legitimate acting credits (which caused valid links such as David Morse
-                # -> The Negotiator -> Samuel L. Jackson to be rejected).
-                m=next((x for x in movies(current) if str(x.get('id'))==mid),None)
-                a=next((x for x in eligible_cast(mid) if str(x.get('id'))==nxt),None)
-                if not(current and nxt and m and a and current!=nxt):
+                connection=validate_connection(current,mid,nxt)
+                if not connection:
                     return self.send_json({'valid':False,'degrees':len(puzzle['live_route'])})
-                step={'movie':{'id':m.get('id') if m else mid,'title':m.get('title') if m else body.get('movie_title','')},'actor':public_person(a or {'id':nxt,'name':body.get('actor_name','')})}
+                m=connection['movie']; a=connection['actor']
+                step={'movie':{'id':m.get('id'),'title':m.get('title') or body.get('movie_title','')},
+                      'actor':public_person(a)}
                 puzzle['live_route'].append(step); puzzle['current_actor']=step['actor']; puzzle['hint_routes']={}
                 degrees=len(puzzle['live_route']); solved=nxt==str(puzzle['target']['id']); remaining=max(0,6-degrees)
                 # Early-failure detection: only declare a DEAD END when the search can actually
