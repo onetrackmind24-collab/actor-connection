@@ -140,18 +140,13 @@ def eligibility_for(mid, actor):
                 'reason':rule.get('reason','curated_override'),
                 'source':rule.get('source'), 'note':rule.get('note')}
 
-    # Game rule: connections must be acting appearances, not crew credits.
-    # TMDB's /movie/{id}/credits cast list is our starting point, but people whose
-    # primary field is directing/writing can still appear there for cameos or loose
-    # metadata. Require a named on-screen role by default. 'Self', archive footage,
-    # voice roles, and ordinary characters all remain eligible because they carry a
-    # character/role string. Any legitimate edge case with a blank role can be
-    # explicitly allowed in eligibility_overrides.json.
-    character=str(actor.get('character') or '').strip()
-    if not character:
-        return {'eligible':False,'reason':'missing_acting_role'}
-
-    return {'eligible':True,'reason':'provider_movie_cast_with_role'}
+    # TMDB's /movie/{id}/credits `cast` array is the authoritative default for
+    # an acting/on-screen movie appearance. Do NOT require a nonblank character
+    # field: valid voice and acting credits can have incomplete role metadata.
+    # Crew-only credits live in the separate `crew` array and never reach this
+    # function through cast(). Known edge cases (for example an ineligible
+    # end-credit-only appearance) are handled with eligibility_overrides.json.
+    return {'eligible':True,'reason':'provider_movie_cast'}
 
 def eligible_cast(mid):
     return [a for a in cast(mid) if eligibility_for(mid,a)['eligible']]
@@ -728,7 +723,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-validation-fix-v1','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-08-credit-fix-v2','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'results':result_stats()})
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0]))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
