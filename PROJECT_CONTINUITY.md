@@ -121,3 +121,12 @@ Commit c611dce8820d53279687231f2bf1e4c5cc0b59e0 deployed build 2026-10-09-respon
 Focused tests passed syntax, off-route bridge, depth limit, timeout handling/context cleanup, and accepted off-route move without live graph crawl.
 Live regression passed Ryan Gosling -> The Nice Guys -> Russell Crowe: move accepted in 5.29 seconds; Hint 1 The Nice Guys in 4.92 seconds; Hint 2 Ryan Gosling in 3.16 seconds. The known finish returns via Ryan then Brad Pitt then Morgan Freeman.
 Remaining: UI end-to-end verification and fallback-search behavior for routes without a known finish inside remaining moves; runtime data durability/backups remain unresolved. Do not claim all bugs fixed.
+
+## October 9, 2026 persistent storage activated and verified
+User upgraded the Render service and reported adding a 1 GB disk mounted at /var/data and setting GAME_DATA_DIR=/var/data.
+Activation commit 5a34d4adf71e9931627ba0e8ad6427e188a668df moves results, active rounds, starter tracking, eligibility overrides and provider cache under GAME_DATA_DIR. Existing persisted seeds are never overwritten. RESULTS_DB remains an optional explicit override.
+Live status confirmed data_directory_configured=true and results_in_data_directory=true. The previous results database was backed up before deployment and contained zero results.
+A test round was recorded (gave up, not solved): total attempts 1, solved 0, provider cache entries 13. Commit f85de60de6e5c3b47b1ab98191b1eff9277d716c triggered another deployment with build 2026-10-09-persistent-state-v4-retention-check. After deployment, live status still showed attempts 1 and cache entries 13: results and cache retention verified across an actual redeployment. Active-round restoration was tested across separate local processes; live active-round retention was not separately asserted.
+The test round remains in aggregate statistics. The disk preserves runtime data; it is not an independently verified backup/restore process.
+Important configuration distinction: render.yaml still declares the original free plan and no disk; the live paid plan/disk/environment were configured in the Render dashboard. Do not synchronize that old blueprint over the verified dashboard setup without updating it deliberately.
+Current source remains GitHub main; current live build is persistent-state-v4-retention-check. Prior durability warnings above describe the baseline and are superseded by this verified update. Remaining gameplay/design gaps above remain open.
