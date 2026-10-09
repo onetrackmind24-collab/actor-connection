@@ -523,7 +523,9 @@ def connection_deep_cut(movie, movie_cast, current_id, next_id):
     The returned values are the game scale: 0 / 5 / 10 / 15.
     """
     by_id={str(a.get('id')):a for a in movie_cast}
-    cur=by_id.get(str(current_id),{}); nxt=by_id.get(str(next_id),{})
+    # Excluded/missing credits cannot earn obscurity points from fallback billing.
+    if str(current_id) not in by_id or str(next_id) not in by_id: return 0
+    cur=by_id[str(current_id)]; nxt=by_id[str(next_id)]
     def billing(a):
         if a.get('order') is not None:
             try: return int(a.get('order'))
@@ -562,7 +564,8 @@ def deep_cut_for_route(start_id, verified):
         movie=next((m for m in movies(cur) if str(m.get('id'))==mid), step['movie'])
         movie_cast=eligible_cast(mid)
         bonus=connection_deep_cut(movie,movie_cast,cur,nxt)
-        details.append({'movie':step['movie']['title'],'actor':step['actor']['name'],'bonus':bonus})
+        from_name=next((a.get('name','') for a in movie_cast if str(a.get('id'))==cur),'')
+        details.append({'movie':step['movie']['title'],'from_actor':from_name,'actor':step['actor']['name'],'bonus':bonus})
         total += bonus; cur=nxt
     return min(25,total), details
 
@@ -1014,7 +1017,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-weekly-rotation-recovery-v17','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-deep-cut-attribution-v18','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
