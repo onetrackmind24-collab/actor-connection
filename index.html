@@ -26,6 +26,12 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 .result{padding:24px;margin-top:14px}.result h2{font-size:30px;margin:7px 0 18px}.result-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}.result-stat{background:#0b1218;border:1px solid #273643;border-radius:12px;padding:14px}.result-stat b{display:block;font-size:22px}.result-stat span{font-size:11px;color:var(--muted);text-transform:uppercase}.comparison{margin-top:16px;padding:14px;border-radius:12px;background:#0b1218;border:1px solid #273643;line-height:1.55}.deep-row{padding:7px 0;border-bottom:1px solid #1d2933}.deep-row:last-child{border-bottom:0}
 @media(max-width:820px){.workspace{grid-template-columns:1fr}.fields{grid-template-columns:1fr}.actions{grid-template-columns:1fr 1fr}.hud{grid-template-columns:repeat(2,1fr)}.difficulty-badge{justify-self:start}.hud-item{border-right:0;border-bottom:1px solid #263443}.stage{grid-template-columns:1fr 34px 1fr}.actor-card{grid-template-columns:100px 1fr}.actor-copy{padding:14px}.actor-copy h2{font-size:20px}}
 @media(max-width:600px){.app{padding:14px 10px 28px}.landing{padding:20px 16px;margin-top:8px}.rule-grid{grid-template-columns:1fr}.landing-intro{font-size:15px}.brand{margin-bottom:14px}.stage{grid-template-columns:1fr 28px 1fr;gap:7px}.actor-card{display:block;min-height:0}.actor-photo{height:140px}.actor-copy{padding:10px}.actor-copy h2{font-size:17px}.eyebrow{font-size:9px}.arrow{font-size:28px}.hud{padding:10px;gap:5px}.hud-item{padding:7px}.hud b{font-size:18px}.difficulty-grid{grid-template-columns:1fr}.actions{grid-template-columns:1fr 1fr}.primary{grid-column:1/-1}.route{font-size:13px}.result-grid{grid-template-columns:1fr 1fr}}
+
+.level-clapper{width:140px;height:104px;margin:16px auto 8px;color:var(--gold2)}
+.level-clapper svg{display:block;width:100%;height:100%;overflow:visible}
+.clapper-arm{transform-box:view-box;transform-origin:20px 42px;animation:level-clap 1s ease-in-out infinite}
+@keyframes level-clap{0%,18%,100%{transform:rotate(0deg)}48%,65%{transform:rotate(-22deg)}82%{transform:rotate(0deg)}}
+@media(prefers-reduced-motion:reduce){.clapper-arm{animation:none}}
 </style>
 </head>
 <body>
@@ -66,6 +72,17 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 
   <section class="panel hidden" id="loading">
     <div class="eyebrow gold">Choose difficulty</div>
+    <div id="levelClapper" class="level-clapper hidden" aria-hidden="true">
+      <svg viewBox="0 0 160 110" focusable="false">
+        <rect x="20" y="42" width="120" height="58" rx="7" fill="#101822" stroke="currentColor" stroke-width="3"/>
+        <path d="M32 62h96M32 79h58" stroke="#8c98a5" stroke-width="3" stroke-linecap="round"/>
+        <g class="clapper-arm">
+          <rect x="20" y="22" width="120" height="20" rx="3" fill="#101822" stroke="currentColor" stroke-width="3"/>
+          <path d="M29 24h15l-10 16H22zM59 24h15L64 40H49zM89 24h15L94 40H79zM119 24h15l-10 16h-15z" fill="currentColor"/>
+        </g>
+        <circle cx="23" cy="43" r="4" fill="currentColor"/>
+      </svg>
+    </div>
     <h2 id="loadTitle">Choose your level</h2>
     <p id="loadText">The puzzle is verified before play begins.</p>
     <label style="display:block;margin:16px 0"><input type="checkbox" id="noHints"> Play without hints</label>
@@ -283,6 +300,7 @@ function applyHintMode(enabled){
 async function begin(level){
   const hintsEnabled=!qs('noHints').checked;
   difficulty=level;
+  qs('levelClapper').classList.remove('hidden');qs('loading').setAttribute('aria-busy','true');
   try{
     qs('loadTitle').textContent='Loading…';qs('loadText').textContent='Verifying a six-degree route before the puzzle starts.';document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);
     let st=await get('/api/status');if(!st.ready)throw Error('The game server is not configured yet.');
@@ -295,6 +313,7 @@ async function begin(level){
     qs('challengeInvite').classList.add('hidden');
     qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();if(challengeBenchmark)msg(challengeBenchmark.solved?'Score to beat: '+challengeBenchmark.points+'. Same actors, difficulty and hint mode.':'Your friend did not reach the target. Finish this puzzle to win.');timer=setInterval(()=>{seconds++;stats()},1000);
   }catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}
+  finally{qs('levelClapper').classList.add('hidden');qs('loading').setAttribute('aria-busy','false')}
 }
 qs('showDifficulty').onclick=()=>{qs('landing').classList.add('hidden');qs('loading').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
 qs('backToRules').onclick=()=>{qs('loading').classList.add('hidden');qs('landing').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
