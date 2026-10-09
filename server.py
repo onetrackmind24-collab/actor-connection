@@ -61,6 +61,61 @@ def save_active_puzzles():
 # Active rounds survive a server restart during the six-hour puzzle window.
 PUZZLES.update(load_active_puzzles())
 
+
+CHALLENGES_FILE=STATE_DIR/'challenges.json'
+CHALLENGE_TTL=7*24*60*60
+CHALLENGE_LOCK=threading.RLock()
+def load_challenges():
+    try:
+        data=json.loads(CHALLENGES_FILE.read_text())
+        return {k:v for k,v in data.items() if isinstance(v,dict) and v.get('expires',0)>time.time()}
+    except (OSError,ValueError,AttributeError): return {}
+CHALLENGES=load_challenges()
+
+def challenge_preview(token):
+    with CHALLENGE_LOCK:
+        item=CHALLENGES.get(token)
+        if not item or item['expires']<=time.time(): return None
+        return {k:item[k] for k in ('start','target','difficulty','hints_enabled','benchmark','expires')}
+
+def create_challenge(puzzle_id,puzzle,result):
+    with CHALLENGE_LOCK:
+        for token,item in CHALLENGES.items():
+            if item.get('source_puzzle_id')==puzzle_id and item['expires']>time.time(): return token
+        token=secrets.token_urlsafe(24)
+        item={k:puzzle[k] for k in ('start','target','difficulty','comparison_route','cut')}
+        item.update({'hints_enabled':puzzle.get('hints_enabled',True),
+                     'cut_meta':puzzle.get('cut_meta',{}),'route_status':puzzle.get('route_status'),
+                     'route_search':puzzle.get('route_search',{}),
+                     'source_puzzle_id':puzzle_id,'expires':time.time()+CHALLENGE_TTL,
+                     'benchmark':{'points':result['points'],'solved':result['solved'],'degrees':result['degrees']}})
+        updated={k:v for k,v in CHALLENGES.items() if v['expires']>time.time()}
+        updated[token]=json.loads(json.dumps(item))
+        tmp=CHALLENGES_FILE.with_suffix('.tmp')
+        tmp.write_text(json.dumps(updated,separators=(',',':')));tmp.replace(CHALLENGES_FILE)
+        CHALLENGES.clear();CHALLENGES.update(updated)
+        return token
+
+def start_challenge(token):
+    with CHALLENGE_LOCK:
+        item=CHALLENGES.get(token)
+        if not item or item['expires']<=time.time(): return None
+        item=json.loads(json.dumps(item))
+    pid=secrets.token_urlsafe(12)
+    puzzle={k:item[k] for k in ('start','target','difficulty','comparison_route','cut','cut_meta','route_status','route_search','hints_enabled')}
+    puzzle.update({'created':time.time(),'live_route':[],'current_actor':puzzle['start'],
+                   'hints_used':0,'backtracks_used':0,'finished':False,
+                   'challenge_token':token,'challenge_benchmark':item['benchmark']})
+    PUZZLES[pid]=puzzle;save_active_puzzles()
+    return {'puzzle_id':pid,'verified':True,**{k:puzzle[k] for k in ('start','target','difficulty','hints_enabled','challenge_token','challenge_benchmark')}}
+
+def compare_challenge(result,benchmark):
+    if result['solved'] and not benchmark['solved']: status='win'
+    elif not result['solved'] and benchmark['solved']: status='loss'
+    elif not result['solved']: status='tie'
+    else: status='win' if result['points']>benchmark['points'] else ('loss' if result['points']<benchmark['points'] else 'tie')
+    return {'status':status,'opponent_points':benchmark['points'],'opponent_solved':benchmark['solved']}
+
 def load_used_starters():
     try:
         data=json.loads(USED_STARTERS_FILE.read_text())
@@ -857,7 +912,7 @@ def resumable_round(puzzle_id, puzzle):
             'current_actor':puzzle['current_actor'],'live_route':played,
             'degrees':len(played),'hints_used':int(puzzle.get('hints_used',0)),
             'backtracks_used':int(puzzle.get('backtracks_used',0)),
-            'free_backs':1+(deep//10),
+            'free_backs':1+(deep//10),'challenge_token':puzzle.get('challenge_token'),'challenge_benchmark':puzzle.get('challenge_benchmark'),
             'elapsed_seconds':max(0,int(time.time()-float(puzzle['created'])))}
 
 class Handler(SimpleHTTPRequestHandler):
@@ -875,12 +930,20 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-earned-backs-hud-v11','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-challenge-links-v12','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
                 return self.send_json(resumable_round(pid,puzzle))
+            if u.path=='/api/challenge':
+                preview=challenge_preview(q.get('token',[''])[0])
+                if preview is None: return self.send_json({'error':'Challenge expired or unknown'},404)
+                return self.send_json(preview)
+            if u.path=='/api/puzzle' and 'challenge' in q:
+                round_data=start_challenge(q['challenge'][0])
+                if round_data is None: return self.send_json({'error':'Challenge expired or unknown'},404)
+                return self.send_json(round_data)
             if u.path=='/api/puzzle': return self.send_json(generate_puzzle(q.get('difficulty',['expert'])[0], hints_enabled=q.get('hints',['on'])[0].lower()!='off'))
             if u.path=='/api/person': return self.send_json(person(q.get('name',[''])[0]))
             if u.path=='/api/autocomplete/movies':
@@ -1077,6 +1140,9 @@ class Handler(SimpleHTTPRequestHandler):
                 # puzzle creation timestamp so a modified client cannot submit a fake time.
                 elapsed=max(0.0, time.time()-float(puzzle.get('created',time.time())))
                 result={'hints_enabled':puzzle.get('hints_enabled',True),'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})}
+                if puzzle.get('challenge_benchmark') is not None:
+                    result['challenge_outcome']=compare_challenge(result,puzzle['challenge_benchmark'])
+                result['challenge_token']=create_challenge(pid,puzzle,result)
                 puzzle['finished']=True
                 puzzle['final_result']=result
                 save_game_result(pid,puzzle,verified,solved,gave_up,hints_used,deep_bonus,hint_penalty,points,elapsed,backtrack_penalty)

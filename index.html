@@ -32,6 +32,15 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 <div class="app">
   <header class="brand"><h1>MAKE THE <span class="cut">CUT</span></h1></header>
 
+  <section class="panel landing hidden" id="challengeInvite">
+    <div class="eyebrow gold">Challenge</div>
+    <h2 id="challengeTitle">Loading challenge…</h2>
+    <p id="challengeDetails"></p>
+    <p id="challengeNote"></p>
+    <button class="btn primary" id="acceptChallenge" disabled>Accept Challenge</button>
+    <button class="btn hidden" id="resumeExisting">Resume My Round</button>
+    <button class="btn" id="normalGame">Play a Regular Round</button>
+  </section>
   <section class="panel landing" id="landing">
     <div class="eyebrow gold">How to play</div>
     <h2>Connect the start actor to the target.</h2>
@@ -118,7 +127,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
       <h2 id="resultTitle"></h2>
       <div id="resultText"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:18px">
-        <button class="btn" id="shareResult">Share Result</button>
+        <button class="btn" id="shareResult">Challenge a Friend</button>
         <button class="btn primary" onclick="location.reload()">Play Again</button>
       </div>
       <p id="shareStatus" aria-live="polite"></p>
@@ -131,6 +140,8 @@ const IMG='https://image.tmdb.org/t/p/w342';
 const qs=id=>document.getElementById(id);
 let start,target,current,puzzleId=null,degree=0,hints=0,seconds=0,timer,route=[],selectedMovie,selectedActor,movieSeq=0,actorSeq=0,freeBacks=1,difficulty='expert';
 let resultShareText='';
+let activeChallengeToken=null;
+let challengeBenchmark=null;
 const ROUND_KEY='make-the-cut-active-round';
 function rememberRound(id){try{if(id)sessionStorage.setItem(ROUND_KEY,id);else sessionStorage.removeItem(ROUND_KEY)}catch(_){}}
 function rememberedRound(){try{return sessionStorage.getItem(ROUND_KEY)}catch(_){return null}}
@@ -196,9 +207,9 @@ async function hint(level){return get('/api/hint?puzzle_id='+encodeURIComponent(
 qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){msg('Hint unavailable.','bad')}};
 qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){msg('Hint unavailable.','bad')}};
 function shareSummary(result){
-  const outcome=result.solved?result.degrees+' / 6 degrees • The Cut '+result.cut+' • '+result.points+' points':'Target not reached • '+result.degrees+' / 6 degrees';
+  const outcome=result.solved?result.degrees+' / 6 degrees • '+result.points+' points':'Target not reached • '+result.degrees+' / 6 degrees';
   const mode=result.hints_enabled===false?'No hints':result.hints_used+' hint level'+(result.hints_used===1?'':'s')+' used';
-  return ['MAKE THE CUT',start.name+' → '+target.name,outcome,difficulty+' • '+mode,'https://actor-connection.onrender.com'].join('\n');
+  return ['MAKE THE CUT',start.name+' → '+target.name,outcome,difficulty+' • '+mode,'Can you beat my score on the same puzzle?','https://actor-connection.onrender.com/?challenge='+encodeURIComponent(result.challenge_token)].join('\n');
 }
 qs('shareResult').onclick=async()=>{
   if(!resultShareText)return;
@@ -206,14 +217,14 @@ qs('shareResult').onclick=async()=>{
   qs('shareStatus').textContent='';
   try{
     if(typeof navigator.share==='function'){
-      try{await navigator.share({title:'Make the Cut',text:resultShareText});qs('shareStatus').textContent='Result shared.';return}
+      try{await navigator.share({title:'Make the Cut Challenge',text:resultShareText});qs('shareStatus').textContent='Challenge shared.';return}
       catch(e){if(e.name==='AbortError')return}
     }
     if(navigator.clipboard?.writeText){
-      try{await navigator.clipboard.writeText(resultShareText);qs('shareStatus').textContent='Result copied. Paste it into a message.';return}catch(_){}
+      try{await navigator.clipboard.writeText(resultShareText);qs('shareStatus').textContent='Challenge copied. Paste it into a message.';return}catch(_){}
     }
     const fallback=qs('shareFallback');fallback.value=resultShareText;fallback.classList.remove('hidden');fallback.focus();fallback.select();
-    qs('shareStatus').textContent='Select and copy your result below.';
+    qs('shareStatus').textContent='Select and copy your challenge below.';
   }finally{button.disabled=false}
 };
 async function finishRound(solved,gaveUp=false){
@@ -235,6 +246,12 @@ async function finishRound(solved,gaveUp=false){
     qs('resultTitle').textContent=gaveUp?'Round ended':'Over the Cut';
     qs('resultText').innerHTML='<p>Target not reached.</p>'+(comparison?'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+' → '+esc(comparison)+'</div></div>':'');
   }
+  if(rd.challenge_outcome){
+    const c=rd.challenge_outcome;
+    const label=c.status==='win'?'You won the challenge!':(c.status==='loss'?'Your friend won this challenge.':'Challenge tied.');
+    const note=document.createElement('p');note.textContent=label+(c.opponent_solved?' Their score: '+c.opponent_points+'.':' Your friend did not reach the target.');
+    qs('resultText').appendChild(note);
+  }
   qs('result').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function applyHintMode(enabled){
@@ -247,11 +264,14 @@ async function begin(level){
   try{
     qs('loadTitle').textContent='Loading…';qs('loadText').textContent='Verifying a six-degree route before the puzzle starts.';document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);
     let st=await get('/api/status');if(!st.ready)throw Error('The game server is not configured yet.');
-    let puzzle=await get('/api/puzzle?difficulty='+encodeURIComponent(level)+'&hints='+(hintsEnabled?'on':'off'));if(!puzzle.verified)throw Error('Puzzle verification failed.');
+    const puzzleUrl=activeChallengeToken?'/api/puzzle?challenge='+encodeURIComponent(activeChallengeToken):'/api/puzzle?difficulty='+encodeURIComponent(level)+'&hints='+(hintsEnabled?'on':'off');
+    let puzzle=await get(puzzleUrl);if(!puzzle.verified)throw Error('Puzzle verification failed.');
+    difficulty=puzzle.difficulty||level;challengeBenchmark=puzzle.challenge_benchmark||null;
     puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;route=[{actor:current,movie:null}];
     rememberRound(puzzleId);
     qs('startName').textContent=start.name;qs('targetName').textContent=target.name;setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);applyHintMode(puzzle.hints_enabled!==false);
-    qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();timer=setInterval(()=>{seconds++;stats()},1000);
+    qs('challengeInvite').classList.add('hidden');
+    qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();if(challengeBenchmark)msg(challengeBenchmark.solved?'Score to beat: '+challengeBenchmark.points+'. Same actors, difficulty and hint mode.':'Your friend did not reach the target. Finish this puzzle to win.');timer=setInterval(()=>{seconds++;stats()},1000);
   }catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}
 }
 qs('showDifficulty').onclick=()=>{qs('landing').classList.add('hidden');qs('loading').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
@@ -276,6 +296,7 @@ async function resumeRound(id){
     }
     if(!r.ok||d.error)throw Error(d.error||'Could not restore round');
     puzzleId=d.puzzle_id;start=d.start;target=d.target;current=d.current_actor;difficulty=d.difficulty;
+    challengeBenchmark=d.challenge_benchmark||null;
     degree=d.degrees;hints=d.hints_used;freeBacks=d.free_backs;seconds=Math.floor(d.elapsed_seconds);
     route=[{actor:start,movie:null},...(d.live_route||[])];
     qs('startName').textContent=start.name;qs('targetName').textContent=target.name;
@@ -292,7 +313,30 @@ async function resumeRound(id){
     document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);
   }
 }
-const savedRound=rememberedRound();if(savedRound)resumeRound(savedRound);
+async function loadChallenge(token){
+  qs('landing').classList.add('hidden');qs('challengeInvite').classList.remove('hidden');
+  activeChallengeToken=token;
+  try{
+    const c=await get('/api/challenge?token='+encodeURIComponent(token));
+    qs('challengeTitle').textContent=c.start.name+' → '+c.target.name;
+    qs('challengeDetails').textContent=(c.benchmark.solved?'Score to beat: '+c.benchmark.points+'.':'Your friend did not reach the target. Finish to win.')+' '+c.difficulty+' • '+(c.hints_enabled?'Hints allowed':'No hints')+'. Link valid for seven days.';
+    qs('acceptChallenge').disabled=false;
+    qs('acceptChallenge').onclick=()=>{qs('noHints').checked=!c.hints_enabled;qs('noHints').disabled=true;qs('challengeInvite').classList.add('hidden');qs('loading').classList.remove('hidden');begin(c.difficulty)};
+    const saved=rememberedRound();
+    if(saved){
+      try{
+        const round=await get('/api/round?puzzle_id='+encodeURIComponent(saved));
+        if(round.challenge_token===token){qs('challengeInvite').classList.add('hidden');await resumeRound(saved);return}
+        qs('challengeNote').textContent='You have a saved round. Resume it, or start this challenge instead.';
+        qs('resumeExisting').classList.remove('hidden');
+        qs('resumeExisting').onclick=()=>{qs('challengeInvite').classList.add('hidden');resumeRound(saved)};
+      }catch(_){}
+    }
+  }catch(e){qs('challengeTitle').textContent='Challenge unavailable';qs('challengeDetails').textContent=e.message}
+}
+qs('normalGame').onclick=()=>{activeChallengeToken=null;qs('noHints').disabled=false;history.replaceState(null,'',location.pathname);qs('challengeInvite').classList.add('hidden');qs('landing').classList.remove('hidden')};
+const inviteToken=new URLSearchParams(location.search).get('challenge');
+const savedRound=rememberedRound();if(inviteToken)loadChallenge(inviteToken);else if(savedRound)resumeRound(savedRound);
 </script>
 </body>
 </html>
