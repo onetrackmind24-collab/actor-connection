@@ -5,6 +5,7 @@ import re, json, os, time, urllib.parse, urllib.request, threading, secrets, dat
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from collections import deque
+from zoneinfo import ZoneInfo
 
 ROOT=Path(__file__).resolve().parent
 # Keep all mutable state on an explicitly configured persistent volume.
@@ -13,7 +14,21 @@ STATE_DIR.mkdir(parents=True,exist_ok=True)
 CACHE_DIR=STATE_DIR/'cache'; CACHE_DIR.mkdir(exist_ok=True)
 TMDB='https://api.themoviedb.org/3'
 TOKEN=os.environ.get('TMDB_API_TOKEN','').strip()
-TARGET_NAME=os.environ.get('WEEKLY_TARGET','Morgan Freeman').strip()
+TARGET_OVERRIDE=os.environ.get('WEEKLY_TARGET','').strip()
+WEEKLY_TARGETS=('Matt Damon','Tom Hanks')
+WEEKLY_ZONE=ZoneInfo('America/New_York')
+WEEKLY_EPOCH=datetime.date(2026,10,5)
+
+def weekly_target(now=None):
+    now=now or datetime.datetime.now(WEEKLY_ZONE)
+    if now.tzinfo is None: raise ValueError('Weekly clock must include a timezone')
+    local=now.astimezone(WEEKLY_ZONE)
+    monday=local.date()-datetime.timedelta(days=local.weekday())
+    index=(monday-WEEKLY_EPOCH).days//7
+    end=datetime.datetime.combine(monday+datetime.timedelta(days=7),datetime.time(),tzinfo=WEEKLY_ZONE)
+    return {'name':TARGET_OVERRIDE or WEEKLY_TARGETS[index%len(WEEKLY_TARGETS)],
+            'week_start':monday.isoformat(),'changes_at':None if TARGET_OVERRIDE else end.isoformat(),
+            'rotation_enabled':not bool(TARGET_OVERRIDE)}
 # Demo fallback pool. Live mode discovers a much larger candidate catalog from the provider.
 # A candidate is NEVER served until the route verifier proves a <=6 route.
 PUZZLE_CANDIDATES={
@@ -60,7 +75,7 @@ def load_active_puzzles():
         data=json.loads(ACTIVE_PUZZLES_FILE.read_text())
         if not isinstance(data,dict): return {}
         cutoff=time.time()-PUZZLE_TTL
-        return {str(k):v for k,v in data.items() if isinstance(v,dict) and float(v.get('created',0))>=cutoff and not v.get('finished')}
+        return {str(k):v for k,v in data.items() if isinstance(v,dict) and float(v.get('created',0))>=cutoff and (not v.get('finished') or isinstance(v.get('final_result'),dict))}
     except Exception:
         return {}
 
@@ -631,7 +646,8 @@ def live_candidate_catalog(max_pages=20):
         return out
     return cached(f'candidate_catalog_{max_pages}',load)
 
-def candidate_names_for(difficulty):
+def candidate_names_for(difficulty,target_name=None):
+    target_name=target_name or weekly_target()['name']
     if DEMO_MODE:
         return list(PUZZLE_CANDIDATES[difficulty])
     catalog=live_candidate_catalog()
@@ -643,7 +659,7 @@ def candidate_names_for(difficulty):
     if difficulty=='beginner': band=ranked[:max(30,n//3)]
     elif difficulty=='intermediate': band=ranked[max(15,n//5):max(50,(n*3)//4)]
     else: band=ranked[max(30,n//2):] or ranked
-    return [x['name'] for x in band if x['name']!=TARGET_NAME]
+    return [x['name'] for x in band if x['name']!=target_name]
 
 
 
@@ -729,7 +745,7 @@ def _name_key(value):
     value=unicodedata.normalize('NFKD',str(value or ''))
     return ''.join(ch.lower() for ch in value if ch.isalnum() and not unicodedata.combining(ch))
 
-def resolve_curated_route(start_person, steps):
+def resolve_curated_route(start_person, steps, target_name=None):
     """Resolve and validate a short named route using the live provider.
 
     This is intentionally small and deterministic: each movie must be in the
@@ -751,7 +767,7 @@ def resolve_curated_route(start_person, steps):
         route.append({'movie':{'id':movie.get('id'),'title':movie.get('title'),'poster_path':movie.get('poster_path')},
                       'actor':public_person(next_actor)})
         current=public_person(next_actor)
-    return route if route and str(current.get('name','')).casefold()==TARGET_NAME.casefold() else None
+    return route if route and str(current.get('name','')).casefold()==(target_name or weekly_target()['name']).casefold() else None
 
 def has_direct_movie_connection(actor_id, target_id):
     """One cheap provider query to keep alpha starters from being direct co-stars.
@@ -776,7 +792,8 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
     cleanup_puzzles()
     difficulty=(difficulty or 'expert').lower()
     if difficulty not in PUZZLE_CANDIDATES: difficulty='expert'
-    target=person(TARGET_NAME)
+    target_name=weekly_target()['name']
+    target=person(target_name)
     if not target: raise RuntimeError('Weekly target could not be loaded')
     # First try the tiny curated alpha pool for this difficulty BEFORE building
     # the broad live candidate catalog.  The catalog is only needed as fallback;
@@ -786,6 +803,19 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
     # expensive six-degree graph crawl on the request that follows a button tap.
     # Every step is still checked against live provider credits before serving.
     curated=CURATED_ALPHA_ROUTES.get(difficulty,[])
+    target_bridges={
+        'Denzel Washington':[('Glory','Denzel Washington')],
+        'Matt Damon':[('Invictus','Matt Damon')],
+        'Tom Hanks':[('Gone Baby Gone','Ed Harris'),('Apollo 13','Tom Hanks')]
+    }
+    if target_name in target_bridges:
+        adapted=[]
+        for starter,steps in curated:
+            extended=steps+target_bridges[target_name]
+            # Stop at the first target appearance; never force a redundant detour.
+            hit=next(i for i,(_,name) in enumerate(extended) if name==target_name)
+            adapted.append((starter,extended[:hit+1]))
+        curated=adapted
     # Prefer a fresh starter, but if the remaining fresh entries fail provider
     # resolution, immediately recycle a known-good curated starter instead of
     # dropping into the expensive live graph crawl. This keeps repeated alpha
@@ -803,7 +833,7 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
         # a movie with the weekly target; otherwise every round collapses to Cut 1.
         if has_direct_movie_connection(candidate.get('id'),target.get('id')):
             continue
-        route=resolve_curated_route(candidate,steps)
+        route=resolve_curated_route(candidate,steps,target_name)
         min_len=2 if DEMO_MODE else {'beginner':2,'intermediate':2,'expert':3}.get(difficulty,2)
         if not route or not (min_len <= len(route) <= 6):
             continue
@@ -825,7 +855,7 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
         }
 
     # Only pay for the broader candidate catalog if every curated route failed.
-    names=candidate_names_for(difficulty)
+    names=candidate_names_for(difficulty,target_name)
     if not names: raise RuntimeError('No starting-actor candidates available')
     start_at=PUZZLE_CURSOR[difficulty] % len(names)
     # Rotate candidates, but serve only after a route is verified under the same graph rules.
@@ -984,11 +1014,14 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-logo-hint-bridges-v15','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':TARGET_NAME,'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-weekly-rotation-recovery-v17','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
-                if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
+                if puzzle.get('finished'):
+                    result=puzzle.get('final_result')
+                    if result is None: return self.send_json({'error':'Round already finished'},409)
+                    return self.send_json(resumable_round(pid,puzzle) | {'finished':True,'final_result':result})
                 return self.send_json(resumable_round(pid,puzzle))
             if u.path=='/api/challenge':
                 preview=challenge_preview(q.get('token',[''])[0])
@@ -1200,7 +1233,7 @@ class Handler(SimpleHTTPRequestHandler):
                 # The browser timer is display-only. Persist elapsed time from the server's
                 # puzzle creation timestamp so a modified client cannot submit a fake time.
                 elapsed=max(0.0, time.time()-float(puzzle.get('created',time.time())))
-                result={'hints_enabled':puzzle.get('hints_enabled',True),'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})}
+                result={'hints_enabled':puzzle.get('hints_enabled',True),'gave_up':gave_up,'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})}
                 if puzzle.get('challenge_benchmark') is not None:
                     result['challenge_outcome']=compare_challenge(result,puzzle['challenge_benchmark'])
                 result['challenge_token']=create_challenge(pid,puzzle,result)

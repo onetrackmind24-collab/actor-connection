@@ -245,11 +245,11 @@ qs('shareResult').onclick=async()=>{
     qs('shareStatus').textContent='Select and copy your challenge below.';
   }finally{button.disabled=false}
 };
-async function finishRound(solved,gaveUp=false){
+async function finishRound(solved,gaveUp=false,recoveredResult=null){
   clearInterval(timer);stats();renderRoute();
   pendingFinish={solved,gaveUp};
   let rd;
-  try{rd=await get('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})})}
+  try{rd=recoveredResult||await get('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})})}
   catch(e){qs('retryResult').classList.remove('hidden');throw Error(e.message+' Your result is pending. Select Retry result.')}
   pendingFinish=null;qs('retryResult').classList.add('hidden');
   resultShareText=shareSummary(rd);
@@ -325,11 +325,17 @@ async function resumeRound(id){
     setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);
     applyHintMode(d.hints_enabled!==false);
     qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');
-    await loadCurrent();clearInterval(timer);timer=setInterval(()=>{seconds++;stats()},1000);
+    await loadCurrent();
+    if(d.finished&&d.final_result){await finishRound(d.final_result.solved,d.final_result.gave_up===true,d.final_result);return}
+    clearInterval(timer);timer=setInterval(()=>{seconds++;stats()},1000);
     msg('Your round has been restored.','ok');
     if(String(current.id)===String(target.id))await finishRound(true);
     else if(degree>=6)await finishRound(false);
   }catch(e){
+    if(pendingFinish){
+      for(const key of ['connect','back','hint1','hint2','giveUp'])qs(key).disabled=true;
+      qs('movieInput').disabled=true;qs('actorInput').disabled=true;msg(e.message,'bad');return;
+    }
     qs('loadTitle').textContent='Could not restore your round';
     qs('loadText').textContent='Your saved round is kept. Reload to retry, or choose a level to start a new round.';
     document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);
