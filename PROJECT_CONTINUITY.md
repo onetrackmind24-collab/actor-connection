@@ -233,3 +233,7 @@ User requested moving clackers when choosing a level, authorizing this change af
 
 ## October 9 clapper minimum visibility
 User reported the loading animation disappears too quickly to see. Keep successful level loading visible for at least 2.2 seconds from selection, roughly two full claps. Slow loads receive no additional fixed delay. Errors still display immediately. This only changes the presentation before the round begins; server-authoritative timing is unchanged.
+
+
+## October 9 single clap and hard cut
+User replaced repeated loading claps with one clap followed by a movie-style hard cut to the game, explicitly no dissolve. Hold the board open while the puzzle verifies, with a 700ms minimum establishing beat. When ready, close once over 240ms, then immediately hide loading/show game. No opacity or scene transition. Reduced-motion skips the arm movement and cuts directly. Errors do not clap or enter the game. Timing/single-close and reduced-motion tests passed; syntax passed. Supersedes the earlier 2.2-second repeated-clap presentation.

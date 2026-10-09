@@ -29,8 +29,9 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 
 .level-clapper{width:140px;height:104px;margin:16px auto 8px;color:var(--gold2)}
 .level-clapper svg{display:block;width:100%;height:100%;overflow:visible}
-.clapper-arm{transform-box:view-box;transform-origin:20px 42px;animation:level-clap 1s ease-in-out infinite}
-@keyframes level-clap{0%,18%,100%{transform:rotate(0deg)}48%,65%{transform:rotate(-22deg)}82%{transform:rotate(0deg)}}
+.clapper-arm{transform-box:view-box;transform-origin:20px 42px;transform:rotate(-22deg)}
+.level-clapper.clap-once .clapper-arm{animation:level-clap .24s cubic-bezier(.7,0,1,1) forwards}
+@keyframes level-clap{from{transform:rotate(-22deg)}to{transform:rotate(0deg)}}
 @media(prefers-reduced-motion:reduce){.clapper-arm{animation:none}}
 </style>
 </head>
@@ -301,13 +302,15 @@ async function begin(level){
   const hintsEnabled=!qs('noHints').checked;
   difficulty=level;
   const loadingStarted=performance.now();
-  qs('levelClapper').classList.remove('hidden');qs('loading').setAttribute('aria-busy','true');
+  qs('levelClapper').classList.remove('hidden','clap-once');qs('loading').setAttribute('aria-busy','true');
   try{
     qs('loadTitle').textContent='Loading…';qs('loadText').textContent='Verifying a six-degree route before the puzzle starts.';document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);
     let st=await get('/api/status');if(!st.ready)throw Error('The game server is not configured yet.');
     const puzzleUrl=activeChallengeToken?'/api/puzzle?challenge='+encodeURIComponent(activeChallengeToken):'/api/puzzle?difficulty='+encodeURIComponent(level)+'&hints='+(hintsEnabled?'on':'off');
     let puzzle=await get(puzzleUrl);if(!puzzle.verified)throw Error('Puzzle verification failed.');
-    await new Promise(resolve=>setTimeout(resolve,Math.max(0,2200-(performance.now()-loadingStarted))));
+    await new Promise(resolve=>setTimeout(resolve,Math.max(0,700-(performance.now()-loadingStarted))));
+    qs('levelClapper').classList.add('clap-once');
+    if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches)await new Promise(resolve=>setTimeout(resolve,240));
     difficulty=puzzle.difficulty||level;challengeBenchmark=puzzle.challenge_benchmark||null;
     puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;route=[{actor:current,movie:null}];
     rememberRound(puzzleId);
