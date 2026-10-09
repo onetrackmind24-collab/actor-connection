@@ -1,1 +1,18 @@
-{}
+{
+  "1726": {
+    "2231": {
+      "eligible": false,
+      "reason": "end_credit_only",
+      "source": "https://www.vanityfair.com/hollywood/2017/11/marvel-looks-back-at-iron-man-the-movie-that-started-it-all",
+      "note": "Samuel L. Jackson as Nick Fury appears only after the credits in Iron Man (2008)."
+    }
+  },
+  "634649": {
+    "2524": {
+      "eligible": false,
+      "reason": "end_credit_only",
+      "source": "https://www.syfy.com/syfy-wire/spider-man-no-way-home-post-credit-scene-explained",
+      "note": "Tom Hardy as Eddie Brock/Venom appears only in the mid-credits scene of Spider-Man: No Way Home (2021)."
+    }
+  }
+}
