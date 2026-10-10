@@ -165,6 +165,46 @@ class GameplayTests(unittest.TestCase):
                     self.assertEqual(current, puzzle['target']['id'])
                     self.assertFalse(game.has_direct_movie_connection(puzzle['start']['id'], puzzle['target']['id']))
 
+    def test_six_connection_hint_score_stays_negative_through_result_and_challenge(self):
+        game = self.game
+        for hints, expected in [(1, -10), (2, -20)]:
+            for cut in range(2, 7):
+                self.assertEqual(game.score_for(6, cut, hints, 25), expected)
+                self.assertEqual(game.score_for(6, cut, hints, 25, 5), expected - 5)
+        self.assertEqual(game.score_for(6, 3, 0, 0), 25)
+        self.assertEqual(game.score_for(5, 3, 2, 25), 55)
+        self.assertEqual(game.score_for(5, 3, 2, 25, 100), 0)
+        self.round.update(start=game.public_person(game.person('Tom Hanks')),
+                          current_actor=game.public_person(game.person('Tom Hanks')),
+                          live_route=[], hints_used=2, backtracks_used=0)
+        for movie, actor in [('m3','p3'), ('m13','p17'), ('m13','p3'),
+                             ('m13','p17'), ('m13','p3'), ('m6','p8')]:
+            status, result = self.request('/api/move', {'movie_id':movie, 'next_actor_id':actor})
+            self.assertEqual(status, 200)
+            self.assertTrue(result['valid'])
+        status, result = self.request('/api/result', {})
+        self.assertEqual(status, 200)
+        self.assertTrue(result['solved'])
+        self.assertEqual(result['points'], -20)
+        self.assertIn('bonuses do not offset', result['scoring_note'])
+        self.assertEqual(self.request('/api/result', {})[1]['points'], -20)
+        with sqlite3.connect(game.RESULTS_DB) as db:
+            self.assertEqual(db.execute('SELECT points FROM game_results WHERE puzzle_id=?', (self.pid,)).fetchone()[0], -20)
+        self.assertEqual(game.compare_challenge({'solved':True,'points':-10}, {'solved':True,'points':-20})['status'], 'win')
+        self.assertEqual(game.compare_challenge({'solved':True,'points':-20}, {'solved':False,'points':0})['status'], 'win')
+
+    def test_existing_challenge_keeps_legacy_scoring(self):
+        game = self.game
+        token = game.create_challenge(self.pid, self.round,
+                                      {'points':5, 'solved':True, 'degrees':6, 'scoring_version':1})
+        # Challenges created before versioning have no scoring_version field.
+        game.CHALLENGES[token].pop('scoring_version')
+        challenge = game.start_challenge(token)
+        self.assertEqual(game.PUZZLES[challenge['puzzle_id']]['scoring_version'], 1)
+        self.assertEqual(game.challenge_preview(token)['scoring_version'], 1)
+        self.assertEqual(game.score_for(6, 3, 2, 0, 0, False), 5)
+        self.assertEqual(game.score_for(6, 3, 2, 0), -20)
+
     def test_weekly_rotation_uses_new_york_monday_and_preserves_roster(self):
         self.game.TARGET_OVERRIDE = ''
         utc = datetime.timezone.utc

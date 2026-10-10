@@ -109,7 +109,8 @@ def challenge_preview(token):
     with CHALLENGE_LOCK:
         item=CHALLENGES.get(token)
         if not item or item['expires']<=time.time(): return None
-        return {k:item[k] for k in ('start','target','difficulty','hints_enabled','benchmark','expires')}
+        return {**{k:item[k] for k in ('start','target','difficulty','hints_enabled','benchmark','expires')},
+                'scoring_version':item.get('scoring_version',1)}
 
 def create_challenge(puzzle_id,puzzle,result):
     with CHALLENGE_LOCK:
@@ -117,7 +118,8 @@ def create_challenge(puzzle_id,puzzle,result):
             if item.get('source_puzzle_id')==puzzle_id and item['expires']>time.time(): return token
         token=secrets.token_urlsafe(24)
         item={k:puzzle[k] for k in ('start','target','difficulty','comparison_route','cut')}
-        item.update({'hints_enabled':puzzle.get('hints_enabled',True),
+        item.update({'scoring_version':result.get('scoring_version',2),
+                     'hints_enabled':puzzle.get('hints_enabled',True),
                      'cut_meta':puzzle.get('cut_meta',{}),'route_status':puzzle.get('route_status'),
                      'route_search':puzzle.get('route_search',{}),
                      'source_puzzle_id':puzzle_id,'expires':time.time()+CHALLENGE_TTL,
@@ -136,7 +138,7 @@ def start_challenge(token):
         item=json.loads(json.dumps(item))
     pid=secrets.token_urlsafe(12)
     puzzle={k:item[k] for k in ('start','target','difficulty','comparison_route','cut','cut_meta','route_status','route_search','hints_enabled')}
-    puzzle.update({'created':time.time(),'live_route':[],'current_actor':puzzle['start'],
+    puzzle.update({'scoring_version':item.get('scoring_version',1),'created':time.time(),'live_route':[],'current_actor':puzzle['start'],
                    'hints_used':0,'backtracks_used':0,'finished':False,
                    'challenge_token':token,'challenge_benchmark':item['benchmark']})
     PUZZLES[pid]=puzzle;save_active_puzzles()
@@ -522,13 +524,17 @@ def cleanup_puzzles():
         stale=[pid for pid,p in PUZZLES.items() if p.get('created',0)<cutoff]
         for pid in stale: PUZZLES.pop(pid,None)
 
-def score_for(degrees, cut=3, hints_used=0, deep_cut_bonus=0):
+def score_for(degrees, cut=3, hints_used=0, deep_cut_bonus=0, backtrack_penalty=0, six_hint_rule=True):
     # The Cut is the expected competent-player route, not the mathematical shortest path.
     # Route efficiency stays primary; Deep Cut bonuses are capped so obscure detours cannot farm points.
     if degrees is None or degrees < 1 or degrees > 6: return 0
     base=max(25, 100 + (cut-degrees)*25)
     hint_penalty=0 if hints_used <= 0 else (10 if hints_used == 1 else 20)
-    return max(0, base + min(25, max(0, deep_cut_bonus)) - hint_penalty)
+    # A six-connection solve with hints has no positive scoring base.
+    # Deep Cuts still earn free backs, but cannot cancel this penalty.
+    if six_hint_rule and degrees == 6 and hints_used > 0:
+        return -hint_penalty - max(0, backtrack_penalty)
+    return max(0, base + min(25, max(0, deep_cut_bonus)) - hint_penalty - max(0, backtrack_penalty))
 
 def connection_deep_cut(movie, movie_cast, current_id, next_id):
     """Estimate how non-obvious a *connection* is, not how famous an actor is.
@@ -1050,7 +1056,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-expanded-roster-v22','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-six-hint-scoring-v23','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1277,11 +1283,15 @@ class Handler(SimpleHTTPRequestHandler):
                 free_backs=1+(deep_bonus//10)
                 backtracks_used=int(puzzle.get('backtracks_used',0))
                 backtrack_penalty=max(0,backtracks_used-free_backs)*5
-                points=max(0,score_for(len(verified),puzzle.get('cut',3),hints_used,deep_bonus)-backtrack_penalty) if solved else 0
+                scoring_version=int(puzzle.get('scoring_version',2))
+                points=score_for(len(verified),puzzle.get('cut',3),hints_used,deep_bonus,backtrack_penalty,scoring_version>=2) if solved else 0
                 # The browser timer is display-only. Persist elapsed time from the server's
                 # puzzle creation timestamp so a modified client cannot submit a fake time.
                 elapsed=max(0.0, time.time()-float(puzzle.get('created',time.time())))
                 result={'hints_enabled':puzzle.get('hints_enabled',True),'gave_up':gave_up,'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})}
+                result['scoring_version']=scoring_version
+                if scoring_version>=2 and solved and len(verified)==6 and hints_used:
+                    result['scoring_note']='Six connections with hints: bonuses do not offset the hint penalty. Paid backtracks also subtract points.'
                 if puzzle.get('challenge_benchmark') is not None:
                     result['challenge_outcome']=compare_challenge(result,puzzle['challenge_benchmark'])
                 result['challenge_token']=create_challenge(pid,puzzle,result)
