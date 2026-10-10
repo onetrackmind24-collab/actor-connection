@@ -18,7 +18,8 @@ function fixture() {
         contains(value) { return this.values.has(value); },
         toggle(value, on) { on ? this.add(value) : this.remove(value); },
       },
-      focus() {}, scrollIntoView() {}, appendChild() {}, setAttribute() {},
+      attrs: {}, focus() {}, scrollIntoView() {}, appendChild() {},
+      setAttribute(name,value) {this.attrs[name]=value;}, removeAttribute(name) {delete this.attrs[name];},
     };
   }
   const context = {
@@ -179,7 +180,47 @@ async function run() {
     await f.nodes.actorInput.oninput();
     assert.match(f.nodes.message.innerHTML,/Actor search unavailable/);
   }
-  console.log('PASS action recovery, expired rounds, request/body timeouts, resume retry and search feedback');
+  // Keyboard choice and cancellation must agree with mouse choice and stale-request guards.
+  {
+    const f=fixture();let prevented=0;
+    const key=value=>({key:value,preventDefault(){prevented++;}});
+    f.context.showDrop(f.nodes.movieDrop,[{id:5,title:'First'},{id:6,title:'Second'}],'movie');
+    f.nodes.movieInput.onkeydown(key('ArrowDown'));
+    f.nodes.movieInput.onkeydown(key('ArrowDown'));
+    f.nodes.movieInput.onkeydown(key('Enter'));
+    assert.equal(vm.runInContext('selectedMovie.id',f.context),6);
+    assert.equal(f.nodes.actorInput.disabled,false);
+    assert.equal(f.nodes.movieInput.attrs['aria-expanded'],'false');
+    f.context.showDrop(f.nodes.actorDrop,[{id:2,name:'Next'},{id:3,name:'Other'}],'actor');
+    f.nodes.actorInput.onkeydown(key('ArrowUp'));
+    f.nodes.actorInput.onkeydown(key('Enter'));
+    assert.equal(vm.runInContext('selectedActor.id',f.context),3);
+    assert.equal(f.nodes.actorInput.attrs['aria-expanded'],'false');
+    assert.equal(prevented,5);
+    let resolveSearch;
+    f.context.fetch=()=>new Promise(resolve=>{resolveSearch=resolve;});
+    f.nodes.movieInput.value='New query';
+    const searching=f.nodes.movieInput.oninput();
+    assert.equal(vm.runInContext('selectedActor',f.context),null);
+    assert.equal(f.nodes.actorInput.disabled,true);
+    assert.equal(f.nodes.actorInput.value,'');
+    f.nodes.movieInput.onkeydown(key('Escape'));
+    resolveSearch(response([{id:7,title:'Late suggestion'}]));await searching;
+    assert.equal(f.nodes.movieDrop.classList.contains('hidden'),true);
+    assert.equal(f.nodes.movieInput.attrs['aria-expanded'],'false');
+    const searchingAgain=f.nodes.movieInput.oninput();
+    await f.context.chooseMovie({id:8,title:'Chosen movie'});
+    resolveSearch(response([{id:9,title:'Late movie'}]));await searchingAgain;
+    assert.equal(vm.runInContext('selectedMovie.id',f.context),8);
+    assert.equal(f.nodes.movieDrop.classList.contains('hidden'),true);
+    f.nodes.actorInput.value='Actor';
+    const actorSearching=f.nodes.actorInput.oninput();
+    await f.context.chooseMovie({id:10,title:'Different film'});
+    resolveSearch(response([{id:4,name:'Wrong film actor'}]));await actorSearching;
+    assert.equal(vm.runInContext('selectedActor',f.context),null);
+    assert.equal(f.nodes.actorDrop.classList.contains('hidden'),true);
+  }
+  console.log('PASS recovery, deadlines, search feedback, keyboard selection and stale suggestions');
 }
 
 run().catch(error => {console.error(error); process.exitCode = 1;});
