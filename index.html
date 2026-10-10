@@ -352,7 +352,7 @@ async function recoverAction(error){
   }catch(e){
     if(pendingFinish){roundSyncRequired=false;qs('retrySync').classList.add('hidden');msg(e.message,'bad');return}
     if(e.message==='Puzzle expired or unknown'){
-      roundSyncRequired=false;rememberRound(null);qs('retrySync').classList.add('hidden');
+      clearInterval(timer);roundSyncRequired=false;rememberRound(null);qs('retrySync').classList.add('hidden');
       qs('gameShell').classList.add('hidden');qs('loading').classList.remove('hidden');
       qs('loadTitle').textContent='Choose your level';qs('loadText').textContent='Your previous round expired. Rounds are kept for six hours.';
       document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);return;

@@ -24,8 +24,9 @@ function fixture() {
   const context = {
     document: {getElementById: id => nodes[id], querySelectorAll: () => []},
     URLSearchParams, location: {search: ''},
-    sessionStorage: {getItem: () => null, removeItem() {}},
-    clearInterval() {}, setInterval() { return 1; },
+    sessionStorage: {getItem: () => null, removeItem() { context.savedRoundCleared = true; }},
+    clearedTimers: 0,
+    clearInterval() { context.clearedTimers++; }, setInterval() { return 1; },
   };
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -99,6 +100,17 @@ async function run() {
   assert.equal(vm.runInContext('routeRevision', context), 3);
   assert.equal(vm.runInContext('hints', context), 0);
   assert.equal(nodes.currentName.textContent, 'Next');
+  const previousClears = context.clearedTimers;
+  context.fetch = async url => {
+    if (url === '/api/backtrack') throw Error('request interrupted');
+    return {ok: false, status: 404, json: async () => ({error: 'Puzzle expired or unknown'})};
+  };
+  await nodes.back.onclick();
+  assert.equal(context.clearedTimers, previousClears + 1);
+  assert.equal(context.savedRoundCleared, true);
+  assert.equal(nodes.loadTitle.textContent, 'Choose your level');
+  assert.equal(nodes.gameShell.classList.contains('hidden'), true);
+  assert.equal(nodes.loading.classList.contains('hidden'), false);
   console.log('PASS dropped move recovery, failed back recovery, blocked retries and stale hint recovery');
 }
 
