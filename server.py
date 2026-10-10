@@ -984,6 +984,15 @@ def bounded_hint_path(current, target, depth, seconds=8, puzzle=None):
     finally:
         SEARCH_CONTEXT.deadline=previous
 
+def route_revision_error(puzzle,body):
+    if 'route_revision' not in body: return None
+    expected=body['route_revision']
+    if type(expected) is not int or expected<0:
+        return ({'error':'Invalid route revision'},400)
+    if expected!=int(puzzle.get('route_revision',0)):
+        return ({'error':'Your round changed. Recover current progress before retrying.','round_changed':True},409)
+    return None
+
 def resumable_round(puzzle_id, puzzle):
     """Expose only player-owned progress; keep comparison answers and The Cut hidden."""
     played=list(puzzle.get('live_route') or [])
@@ -991,7 +1000,7 @@ def resumable_round(puzzle_id, puzzle):
     return {'puzzle_id':puzzle_id,'verified':True,'difficulty':puzzle['difficulty'],'hints_enabled':puzzle.get('hints_enabled',True),
             'start':puzzle['start'],'target':puzzle['target'],
             'current_actor':puzzle['current_actor'],'live_route':played,
-            'degrees':len(played),'hints_used':int(puzzle.get('hints_used',0)),
+            'degrees':len(played),'route_revision':int(puzzle.get('route_revision',0)),'hints_used':int(puzzle.get('hints_used',0)),
             'backtracks_used':int(puzzle.get('backtracks_used',0)),
             'free_backs':1+(deep//10),'challenge_token':puzzle.get('challenge_token'),'challenge_benchmark':puzzle.get('challenge_benchmark'),
             'elapsed_seconds':max(0,int(time.time()-float(puzzle['created'])))}
@@ -1017,7 +1026,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-09-atomic-round-actions-v19','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-route-recovery-v20','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1097,6 +1106,11 @@ class Handler(SimpleHTTPRequestHandler):
                 pid=q.get('puzzle_id',[''])[0]; level=min(2,max(1,int(q.get('level',['1'])[0])))
                 cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
+                if 'route_revision' in q:
+                    try: expected=int(q['route_revision'][0])
+                    except (ValueError,TypeError): return self.send_json({'error':'Invalid route revision'},400)
+                    revision_error=route_revision_error(puzzle,{'route_revision':expected})
+                    if revision_error: return self.send_json(*revision_error)
                 if not puzzle.get('hints_enabled',True): return self.send_json({'error':'Hints are disabled for this round'},403)
                 depth=max(0,6-len(puzzle.get('live_route') or []))
                 if depth==0 or puzzle.get('finished'): return self.send_json({'error':'No moves remaining'},409)
@@ -1153,6 +1167,8 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json({'valid': validate_connection(current,mid,nxt) is not None})
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
+                revision_error=route_revision_error(puzzle,body)
+                if revision_error: return self.send_json(*revision_error)
                 current=str(puzzle['current_actor']['id']); nxt=str(body.get('next_actor_id','')); mid=str(body.get('movie_id',''))
                 if len(puzzle['live_route'])>=6: return self.send_json({'error':'Six-degree limit reached'},409)
                 token=str(body.get('connection_token','') or '')
@@ -1170,7 +1186,7 @@ class Handler(SimpleHTTPRequestHandler):
                 step={'movie':{'id':m.get('id'),'title':m.get('title') or body.get('movie_title','')},
                       'actor':public_person(a)}
                 # Compute against a proposed snapshot; provider failures must not advance the round.
-                proposed=dict(puzzle,live_route=puzzle['live_route']+[step],current_actor=step['actor'],hint_routes={},offered_connections={})
+                proposed=dict(puzzle,route_revision=int(puzzle.get('route_revision',0))+1,live_route=puzzle['live_route']+[step],current_actor=step['actor'],hint_routes={},offered_connections={})
                 degrees=len(proposed['live_route']); solved=nxt==str(puzzle['target']['id']); remaining=max(0,6-degrees)
                 # Early-failure detection: only declare a DEAD END when the search can actually
                 # prove there is no finish inside the remaining moves. In demo mode the graph is
@@ -1193,13 +1209,15 @@ class Handler(SimpleHTTPRequestHandler):
                 free_backs=1+(earned_deep//10)
                 puzzle.update(proposed)
                 save_active_puzzles()
-                return self.send_json({'valid':True,'degrees':degrees,'remaining':remaining,'current_actor':step['actor'],'solved':solved,'limit_reached':degrees>=6,'free_backs':free_backs,'deep_cut_bank':earned_deep,'viability':viability,'dead_end':viability=='dead_end'})
+                return self.send_json({'valid':True,'degrees':degrees,'route_revision':proposed['route_revision'],'remaining':remaining,'current_actor':step['actor'],'solved':solved,'limit_reached':degrees>=6,'free_backs':free_backs,'deep_cut_bank':earned_deep,'viability':viability,'dead_end':viability=='dead_end'})
             if self.path=='/api/backtrack':
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
+                revision_error=route_revision_error(puzzle,body)
+                if revision_error: return self.send_json(*revision_error)
                 if not puzzle['live_route']: return self.send_json({'error':'Already at starting actor'},409)
-                proposed=dict(puzzle,live_route=puzzle['live_route'][:-1],hint_routes={},offered_connections={})
+                proposed=dict(puzzle,route_revision=int(puzzle.get('route_revision',0))+1,live_route=puzzle['live_route'][:-1],hint_routes={},offered_connections={})
                 proposed['backtracks_used']=int(proposed.get('backtracks_used',0))+1
                 proposed['current_actor']=proposed['live_route'][-1]['actor'] if proposed['live_route'] else proposed['start']
                 proposed['hint_routes']={}
@@ -1210,7 +1228,7 @@ class Handler(SimpleHTTPRequestHandler):
                 penalty=max(0,int(proposed['backtracks_used'])-free_backs)*5
                 puzzle.update(proposed)
                 save_active_puzzles()
-                return self.send_json({'ok':True,'degrees':len(proposed['live_route']),'current_actor':proposed['current_actor'],'backtracks_used':proposed['backtracks_used'],'free_backs':free_backs,'backtrack_penalty':penalty,'deep_cut_bank':earned_deep})
+                return self.send_json({'ok':True,'route_revision':proposed['route_revision'],'degrees':len(proposed['live_route']),'current_actor':proposed['current_actor'],'backtracks_used':proposed['backtracks_used'],'free_backs':free_backs,'backtrack_penalty':penalty,'deep_cut_bank':earned_deep})
             if self.path=='/api/result':
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
