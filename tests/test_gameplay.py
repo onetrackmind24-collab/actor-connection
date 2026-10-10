@@ -205,6 +205,41 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(game.score_for(6, 3, 2, 0, 0, False), 5)
         self.assertEqual(game.score_for(6, 3, 2, 0), -20)
 
+    def test_short_off_route_hint_joins_movies_and_respects_depth_and_roles(self):
+        game=self.game
+        game.DEMO_MODE=False
+        films={'current':[{'id':'inception','title':'Inception'}],
+               'bridge':[{'id':'inception','title':'Inception'},{'id':'departed','title':'The Departed'}],
+               'target':[{'id':'departed','title':'The Departed'}]}
+        cast={'inception':[{'id':'current','name':'Tom Berenger','character':'Browning'},
+                           {'id':'bridge','name':'Leonardo DiCaprio','character':'Cobb'}],
+              'departed':[{'id':'bridge','name':'Leonardo DiCaprio','character':'Billy'},
+                          {'id':'target','name':'Matt Damon','character':'Colin'}]}
+        with patch.object(game,'movies',side_effect=lambda aid:films[str(aid)]), \
+             patch.object(game,'cast',side_effect=lambda mid:cast[str(mid)]):
+            self.assertIsNone(game.short_hint_path('current','target',1))
+            route=game.bounded_hint_path('current','target',2)
+            self.assertEqual([s['movie']['id'] for s in route],['inception','departed'])
+            cast['departed'][1]['character']='Colin (cameo)'
+            self.assertIsNone(game.short_hint_path('current','target',2))
+        self.assertIsNone(getattr(game.SEARCH_CONTEXT,'deadline',None))
+
+    def test_short_hint_timeout_keeps_time_for_known_route_fallback(self):
+        game=self.game
+        route=[self.first]
+        with patch.object(game,'short_hint_path',side_effect=TimeoutError('cold credits')), \
+             patch.object(game,'known_bridge_path',return_value=route):
+            self.assertEqual(game.bounded_hint_path('current','target',3,puzzle=self.round),route)
+        self.assertIsNone(getattr(game.SEARCH_CONTEXT,'deadline',None))
+
+    def test_verified_path_is_retained_when_wider_search_times_out(self):
+        game=self.game;game.DEMO_MODE=False
+        route=[self.first,self.first]
+        with patch.object(game,'_bounded_bfs',side_effect=[(route,{'steps':1}),TimeoutError('budget')]):
+            found,meta=game.find_path_with_meta('start','target',6)
+            self.assertEqual(found,route)
+            self.assertEqual(meta['status'],'verified_route')
+
     def test_obscure_cast_discoveries_are_expert_starters_only(self):
         game=self.game
         game.DEMO_MODE=False

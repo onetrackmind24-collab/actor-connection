@@ -510,7 +510,11 @@ def find_path_with_meta(start,target,max_depth=6):
     stages=[(40,35),(80,60),(140,100)]
     best=None; best_stats=None
     for movie_limit,cast_limit in stages:
-        path,stats=_bounded_bfs(start,target,max_depth,movie_limit,cast_limit)
+        try:
+            path,stats=_bounded_bfs(start,target,max_depth,movie_limit,cast_limit)
+        except TimeoutError:
+            if best is not None: break
+            raise
         if path is not None and (best is None or len(path)<len(best)):
             best,best_stats=path,stats
             # One degree is mathematically unbeatable; no wider pass can improve it.
@@ -1037,6 +1041,16 @@ def verify_weekly_rotation():
     with ROTATION_AUDIT_LOCK:
         if ROTATION_AUDIT['status']=='running': return
         ROTATION_AUDIT.update(status='running',started_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),checks=checks)
+    if not DEMO_MODE:
+        probe={'current':'Tom Berenger','target':'Matt Damon','status':'failed'}
+        try:
+            current=person(probe['current']);target=person(probe['target'])
+            route=bounded_hint_path(current['id'],target['id'],2)
+            if route and len(route)<=2 and route_allowed_by_overrides(current['id'],route) and str(route[-1]['actor']['id'])==str(target['id']):
+                probe.update(status='passed',degrees=len(route))
+        except Exception:
+            pass
+        with ROTATION_AUDIT_LOCK: ROTATION_AUDIT['off_route_hint_check']=probe
     for index,check in enumerate(checks):
         try:
             puzzle=generate_puzzle(check['difficulty'],target_name=check['target'],dry_run=True)
@@ -1126,14 +1140,57 @@ def known_bridge_path(puzzle,current,target,depth):
             return [step]+tail
     return None
 
+def short_hint_path(current,target,depth):
+    """Prefer direct and two-movie joins instead of expanding a large BFS frontier."""
+    if depth<=0: return None
+    current=str(current);target=str(target)
+    target_movies={str(m['id']) for m in movies(target)}
+    current_movies=movies(current)
+    def step(connection):
+        m=connection['movie']
+        return {'movie':{'id':m['id'],'title':m.get('title'),'poster_path':m.get('poster_path')},
+                'actor':public_person(connection['actor'])}
+    for movie in current_movies:
+        check_search_budget()
+        if str(movie['id']) in target_movies:
+            connection=validate_connection(current,movie['id'],target)
+            if connection:return [step(connection)]
+    if depth<2:return None
+    seen={current,target}
+    for movie in current_movies[:16]:
+        for actor in valid_connection_candidates(current,movie['id'])[:6]:
+            check_search_budget()
+            aid=str(actor['id'])
+            if aid in seen:continue
+            seen.add(aid)
+            for bridge_movie in movies(aid):
+                check_search_budget()
+                if str(bridge_movie['id']) not in target_movies:continue
+                finish=validate_connection(aid,bridge_movie['id'],target)
+                start=validate_connection(current,movie['id'],aid)
+                if start and finish:return [step(start),step(finish)]
+    return None
+
 def bounded_hint_path(current, target, depth, seconds=8, puzzle=None):
     previous=getattr(SEARCH_CONTEXT,'deadline',None)
-    SEARCH_CONTEXT.deadline=time.monotonic()+seconds
+    limit=time.monotonic()+seconds
+    SEARCH_CONTEXT.deadline=min(previous,limit) if previous is not None else limit
     try:
+        # Reserve time for verified-route joins and BFS if the short join is cold.
+        SEARCH_CONTEXT.deadline=min(SEARCH_CONTEXT.deadline,time.monotonic()+4)
+        try:
+            shortcut=short_hint_path(current,target,depth)
+        except TimeoutError:
+            shortcut=None
+        finally:
+            SEARCH_CONTEXT.deadline=min(previous,limit) if previous is not None else limit
+        if shortcut:return shortcut
         if puzzle is not None and depth>0:
             shortcut=known_bridge_path(puzzle,current,target,depth)
             if shortcut: return shortcut
-        return find_path(current,target,depth)
+        # Return the first verified route; widening after success can lose a
+        # usable hint to a later timeout. Never claim global shortest here.
+        return _bounded_bfs(current,target,depth,40,35)[0]
     except (TimeoutError, OSError):
         return None
     finally:
@@ -1181,7 +1238,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-starter-difficulty-v33','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-short-hint-search-v34','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
