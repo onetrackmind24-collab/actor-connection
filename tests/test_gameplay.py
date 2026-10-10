@@ -248,6 +248,37 @@ class GameplayTests(unittest.TestCase):
             self.assertEqual(actors[0]['id'],'blank')
             self.assertTrue(actors[0]['connection_token'])
 
+    def test_undated_movie_cast_credit_remains_playable(self):
+        game = self.game
+        game.DEMO_MODE = False
+        current = str(self.round['current_actor']['id'])
+        movie = {'id':771,'title':'Undated Film','release_date':'','popularity':0}
+        rows = [{'id':current,'name':'Current','character':''},
+                {'id':'next','name':'Voice Performer','character':'Narrator (voice)'},
+                {'id':'cameo','name':'Cameo Performer','character':'Self (cameo)'}]
+        game.MEM['movies_'+current] = (game.time.time(), [])
+        def provider(path, params=None):
+            if path == '/person/'+current+'/movie_credits':
+                return {'cast':[movie, {'title':'Missing ID'}, {'id':772}],
+                        'crew':[{'id':773,'title':'Crew Film','release_date':'2000-01-01'}]}
+            if path == '/movie/771/credits':
+                return {'cast':rows,'crew':[{'id':'crew','name':'Crew Member'}]}
+            raise AssertionError(path)
+        with patch.object(game,'tmdb',side_effect=provider):
+            self.assertEqual(game.movies(current), [movie])
+            self.assertIsNotNone(game.validate_connection(current,771,'next'))
+            self.assertIsNone(game.validate_connection(current,771,'cameo'))
+            self.assertIsNone(game.validate_connection(current,771,'crew'))
+            status, matches = self.request('/api/autocomplete/movies?'+urllib.parse.urlencode(
+                {'puzzle_id':self.pid,'q':'Undated'}))
+            self.assertEqual(status,200)
+            self.assertEqual(matches[0]['id'],771)
+            status, actors = self.request('/api/autocomplete/actors?'+urllib.parse.urlencode(
+                {'puzzle_id':self.pid,'movie_id':771,'q':'Voice'}))
+            self.assertEqual(status,200)
+            self.assertEqual(actors[0]['id'],'next')
+            self.assertTrue(actors[0]['connection_token'])
+
     def test_person_lookup_prefers_exact_actor_name(self):
         game = self.game
         game.DEMO_MODE=False

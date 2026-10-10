@@ -279,3 +279,12 @@ New autocomplete supports Arrow Up/Down, Enter, Escape, active-option styling, A
 
 ## October 10: completed-round and New Game flow (v28)
 Continued gameplay review after v27 keyboard validation in the live browser (Denis O'Hare through The Proposal to Ryan Reynolds, Enter submission and Escape dismissal). Replaced reload-based Play Again with New Game returning to level choice, clearing challenge context and only the challenge URL parameter, preserving unrelated URL parameters/hash, and unlocking hint-mode selection. Successful results mark the frontend round finished, disable gameplay controls, and reject further action callbacks. Keyboard focus moves to the result heading; a fresh game re-enables controls and focuses the movie field; successful move/back recovery refocuses the movie input. Failed six-connection endings now say Six-connection limit reached. Result time honors server zero rather than falling back to client timer. Frontend regression suite covers completed action blocking, exact zero elapsed display, challenge reset without reload, normal puzzle URL, fresh controls and focus, and exhausted title. Fifteen backend tests remain passing. Universal credit curation and mobile/Safari testing remain open.
+
+
+## October 10 launch pass — v29 movie credit completeness
+
+- Removed the release-date requirement from provider movie CAST credits. Valid movie roles with missing release metadata remain available in search, connection validation, and hints. Crew-only rows remain excluded, and canonical movie-side role eligibility still applies.
+- Versioned movie credit caches to movies_v2 so persistent old filtered entries cannot hide valid undated credits after deployment.
+- Added an offline provider-backed regression covering undated-film search, voice connection offers, stale cache isolation, malformed-row exclusion, and cameo/crew rejection.
+- Previous v28 live browser verification completed: Melissa Leo -> The Big Short -> Brad Pitt -> Se7en -> Morgan Freeman -> Invictus -> Matt Damon; 3 degrees, 2 hints, score 80. New Game returned to difficulty selection with focus, fresh Intermediate Jack Kehler counters and controls reset, and that round survived refresh after deployment. Cleared the stale Connection accepted message on New Game.
+- Remaining launch work: wider credit exception curation, mobile/Safari human testing, starter coverage expansion and difficulty calibration. All eligible performers are intended to be playable; do not claim every provider credit or generated starter is exhaustively verified.
