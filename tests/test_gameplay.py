@@ -516,6 +516,22 @@ class GameplayTests(unittest.TestCase):
         fallback.assert_called_once()
         self.assertIsNone(getattr(game.SEARCH_CONTEXT,'deadline',None))
 
+    def test_launch_hides_target_previews_until_play_but_beta_keeps_them(self):
+        game=self.game
+        created=game.create_custom_challenge(self.round['start']['name'],self.round['target']['name'])
+        token=created['token']
+        with patch.object(game,'TARGET_PREVIEWS_ENABLED',True):
+            self.assertEqual(self.request('/api/status')[1]['weekly_target'],'Matt Damon')
+            self.assertIsNotNone(game.challenge_preview(token)['target'])
+        with patch.object(game,'TARGET_PREVIEWS_ENABLED',False):
+            status=self.request('/api/status')[1]
+            self.assertIsNone(status['weekly_target']);self.assertIsNone(status['weekly_schedule'])
+            self.assertEqual(set(status['rotation_verification']),{'status'})
+            self.assertTrue(game.challenge_preview(token)['target_hidden'])
+            self.assertIsNone(game.challenge_preview(token)['target'])
+            accepted=game.start_challenge(token)
+            self.assertEqual(accepted['target']['name'],self.round['target']['name'])
+
     def test_weekly_rotation_uses_new_york_monday_and_preserves_roster(self):
         self.game.TARGET_OVERRIDE = ''
         utc = datetime.timezone.utc

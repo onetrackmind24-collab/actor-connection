@@ -15,6 +15,7 @@ CACHE_DIR=STATE_DIR/'cache'; CACHE_DIR.mkdir(exist_ok=True)
 TMDB='https://api.themoviedb.org/3'
 TOKEN=os.environ.get('TMDB_API_TOKEN','').strip()
 TARGET_OVERRIDE=os.environ.get('WEEKLY_TARGET','').strip()
+TARGET_PREVIEWS_ENABLED=os.environ.get('GAME_RELEASE_STAGE','beta').strip().lower()=='beta'
 WEEKLY_TARGETS=('Matt Damon','Tom Hanks','Morgan Freeman','Denzel Washington',
                 'Michael Caine','Clint Eastwood','Jack Nicholson',
                 'Scarlett Johansson','Angelina Jolie')
@@ -110,7 +111,9 @@ def challenge_preview(token):
     with CHALLENGE_LOCK:
         item=CHALLENGES.get(token)
         if not item or item['expires']<=time.time(): return None
-        return {**{k:item[k] for k in ('start','target','difficulty','hints_enabled','benchmark','expires')},
+        return {**{k:item[k] for k in ('start','difficulty','hints_enabled','benchmark','expires')},
+                'target':item['target'] if TARGET_PREVIEWS_ENABLED else None,
+                'target_hidden':not TARGET_PREVIEWS_ENABLED,
                 'scoring_version':item.get('scoring_version',1),'kind':item.get('kind','score')}
 
 def create_challenge(puzzle_id,puzzle,result):
@@ -169,7 +172,8 @@ def create_custom_challenge(start_name,target_name,hints_enabled=True):
             tmp.write_text(json.dumps(updated,separators=(',',':')));tmp.replace(CHALLENGES_FILE)
             CHALLENGES.clear();CHALLENGES.update(updated)
         return {'token':token,'url':'https://actor-connection.onrender.com/?challenge='+token,
-                'start':item['start'],'target':item['target'],'hints_enabled':item['hints_enabled'],'verified':True}
+                'start':item['start'],'target':item['target'],'hints_enabled':item['hints_enabled'],
+                'target_hidden':not TARGET_PREVIEWS_ENABLED,'verified':True}
     except TimeoutError as error:
         raise ValueError('Verification reached its time limit. Retry or choose another actor pair.') from error
     finally:SEARCH_CONTEXT.deadline=previous
@@ -1259,7 +1263,7 @@ def resumable_round(puzzle_id, puzzle):
             'free_backs':1+(deep//10),'challenge_token':puzzle.get('challenge_token'),'challenge_benchmark':puzzle.get('challenge_benchmark'),
             'elapsed_seconds':max(0,int(time.time()-float(puzzle['created'])))}
 
-PUBLIC_FILES={'/':'index.html','/index.html':'index.html','/assets/make-the-cut-logo.png':'assets/make-the-cut-logo.png'}
+PUBLIC_FILES={'/':'index.html','/index.html':'index.html','/scoring.html':'scoring.html','/assets/make-the-cut-logo.png':'assets/make-the-cut-logo.png'}
 
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self,path):
@@ -1280,14 +1284,14 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-custom-actor-challenges-v35','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-clean-instructions-v36','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('finished'):
                     result=puzzle.get('final_result')
                     if result is None: return self.send_json({'error':'Round already finished'},409)
-                    return self.send_json(resumable_round(pid,puzzle) | {'finished':True,'final_result':result})
+                    return self.send_json(resumable_round(pid,puzzle) | {'finished':True,'final_result':result | {'target_hidden':not TARGET_PREVIEWS_ENABLED}})
                 return self.send_json(resumable_round(pid,puzzle))
             if u.path=='/api/challenge':
                 preview=challenge_preview(q.get('token',[''])[0])
@@ -1499,7 +1503,7 @@ class Handler(SimpleHTTPRequestHandler):
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('final_result') is not None:
-                    return self.send_json(puzzle['final_result'])
+                    return self.send_json(puzzle['final_result'] | {'target_hidden':not TARGET_PREVIEWS_ENABLED})
                 # Final scoring consumes only the server-owned route. Client-submitted route
                 # data is intentionally ignored so browser state cannot manufacture a solve.
                 verified=list(puzzle.get('live_route') or [])
@@ -1526,6 +1530,7 @@ class Handler(SimpleHTTPRequestHandler):
                 elapsed=max(0.0, time.time()-float(puzzle.get('created',time.time())))
                 result={'hints_enabled':puzzle.get('hints_enabled',True),'gave_up':gave_up,'solved':solved,'degrees':len(verified),'points':points,'cut':puzzle.get('cut',3),'cut_source':puzzle.get('cut_meta',{}).get('source','seed'),'cut_samples':puzzle.get('cut_meta',{}).get('samples',0),'quick_cut_bonus':quick_cut_bonus,'deep_cut_bonus':deep_bonus,'deep_cut_details':deep_details,'hint_penalty':hint_penalty,'hints_used':hints_used,'backtracks_used':backtracks_used,'free_backs':free_backs,'backtrack_penalty':backtrack_penalty,'elapsed_seconds':round(elapsed,3),'comparison_degrees':len(comparison) if comparison is not None else None,'comparison_route':comparison,'comparison_label':'Shortest verified route' if proven else 'Verified comparison route','shortest_proven':proven,'search_scope':puzzle.get('route_search',{}).get('scope','complete_demo_graph' if DEMO_MODE else 'adaptive_live_graph'),'search_stats':puzzle.get('route_search',{}).get('stats',{})}
                 result['scoring_version']=scoring_version
+                result['target_hidden']=not TARGET_PREVIEWS_ENABLED
                 if scoring_version>=2 and solved and len(verified)==6 and hints_used:
                     result['scoring_note']='Six connections with hints: bonuses do not offset the hint penalty. Paid backtracks also subtract points.'
                 if puzzle.get('challenge_benchmark') is not None:

@@ -74,6 +74,12 @@ async function run() {
   await custom.context.loadChallenge('custom');
   assert.match(custom.nodes.challengeDetails.textContent,/Custom actor challenge/);
   assert.equal(custom.nodes.acceptChallenge.disabled,false);
+  custom.context.fetch=async()=>response({start:{name:'Start'},target:null,target_hidden:true,difficulty:'custom',hints_enabled:true,benchmark:null,scoring_version:2});
+  await custom.context.loadChallenge('launch');
+  assert.equal(custom.nodes.challengeTitle.textContent,'Start → Hidden target');
+  const hiddenShare=custom.context.shareSummary({solved:true,degrees:2,points:80,hints_used:0,target_hidden:true,challenge_token:'launch'});
+  assert.match(hiddenShare,/Start → Hidden target/);
+  assert.equal(hiddenShare.includes('→ Target'),false);
   const weekly=fixture();
   weekly.context.fetch=async()=>response({weekly_schedule:{name:'Matt Damon',rotation_enabled:true,
     next_name:'Tom Hanks',changes_at:'2026-10-12T00:00:00-04:00'}});
@@ -88,9 +94,13 @@ async function run() {
   release(response({weekly_schedule:{name:'Matt Damon',rotation_enabled:true,next_name:'Tom Hanks',changes_at:'2026-10-12T00:00:00-04:00'}}));
   await stale;
   assert.equal(weekly.nodes.weeklyFeature.textContent,'This week’s target: Tom Hanks.');
+  weekly.context.fetch=async()=>response({weekly_schedule:null});
+  await weekly.context.refreshWeeklyFeature();
+  assert.equal(weekly.nodes.weeklyFeature.textContent,'');
+  assert.equal(weekly.nodes.weeklyFeature.classList.contains('hidden'),true);
   weekly.context.fetch=async()=>{throw Error('offline')};
   await weekly.context.refreshWeeklyFeature();
-  assert.equal(weekly.nodes.weeklyFeature.textContent,'This week’s target: Tom Hanks.');
+  assert.equal(weekly.nodes.weeklyFeature.textContent,'');
   const {nodes, context} = fixture();
   let moveRequests = 0;
   context.fetch = async (url, options) => {
