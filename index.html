@@ -44,6 +44,26 @@ button:focus-visible{outline:3px solid var(--gold2);outline-offset:3px}
 <div class="app">
   <header class="brand"><h1 class="logo-title"><img class="brand-logo" src="/assets/make-the-cut-logo.png" alt="Make the Cut" width="1964" height="801" fetchpriority="high" decoding="async"></h1></header>
 
+  <section class="panel landing hidden" id="customChallenge">
+    <div class="eyebrow gold">Challenge Mode</div>
+    <h2>Create a two-actor challenge</h2>
+    <p>Choose the start and target actors. We verify a movie route within six connections before creating a link. The answer stays hidden.</p>
+    <div class="fields">
+      <div class="field"><label for="customStart">Starting actor</label><input id="customStart" placeholder="Jack Nicholson" maxlength="100" autocomplete="off"></div>
+      <div class="field"><label for="customTarget">Target actor</label><input id="customTarget" placeholder="Gedde Watanabe" maxlength="100" autocomplete="off"></div>
+    </div>
+    <label style="display:block;margin:16px 0"><input type="checkbox" id="customNoHints"> Play without hints</label>
+    <button class="btn primary" id="createCustom">Verify and Create Challenge</button>
+    <p id="customStatus" role="status" aria-live="polite"></p>
+    <div id="customReady" class="hidden">
+      <p id="customPair"></p>
+      <label for="customLink">Challenge link to send</label>
+      <textarea id="customLink" readonly style="width:100%;min-height:80px;font-size:16px"></textarea>
+      <button class="btn" id="copyCustom">Copy Challenge</button>
+      <a class="btn" id="playCustom">Play This Challenge</a>
+    </div>
+    <button class="btn back-home" id="closeCustom">← Rules</button>
+  </section>
   <section class="panel landing hidden" id="challengeInvite">
     <div class="eyebrow gold">Challenge</div>
     <h2 id="challengeTitle">Loading challenge…</h2>
@@ -74,6 +94,7 @@ button:focus-visible{outline:3px solid var(--gold2);outline-offset:3px}
       <div><strong>The Cut stays hidden.</strong> Beat it for a Quick Cut bonus. Obscure connections can earn separate Deep Cut points.</div>
     </div>
 
+    <button class="btn back-home" id="showCustom">Create a Two-Actor Challenge</button>
     <button class="btn primary landing-start" id="showDifficulty">Choose Difficulty →</button>
   </section>
 
@@ -474,7 +495,7 @@ async function loadChallenge(token){
   try{
     const c=await get('/api/challenge?token='+encodeURIComponent(token));
     qs('challengeTitle').textContent=c.start.name+' → '+c.target.name;
-    qs('challengeDetails').textContent=(c.benchmark.solved?'Score to beat: '+c.benchmark.points+'.':'Your friend did not reach the target. Finish to win.')+' '+c.difficulty+' • '+(c.hints_enabled?'Hints allowed':'No hints')+'. Link valid for seven days.';
+    qs('challengeDetails').textContent=(c.benchmark?(c.benchmark.solved?'Score to beat: '+c.benchmark.points+'.':'Your friend did not reach the target. Finish to win.'):'Custom actor challenge. Reach the target in six connections or fewer.')+' '+c.difficulty+' • '+(c.hints_enabled?'Hints allowed':'No hints')+'. Link valid for seven days.';
     if(c.scoring_version===1)qs('challengeDetails').textContent+=' This older challenge keeps its original scoring; the six-connection hint penalty does not apply.';
     qs('acceptChallenge').disabled=false;
     qs('acceptChallenge').onclick=()=>{qs('noHints').checked=!c.hints_enabled;qs('noHints').disabled=true;qs('challengeInvite').classList.add('hidden');qs('loading').classList.remove('hidden');begin(c.difficulty)};
@@ -503,6 +524,29 @@ qs('newGame').onclick=()=>{
   qs('loadTitle').textContent='Choose your level';qs('loadText').textContent='Start a new round against the weekly featured actor.';
   document.querySelectorAll('.difficulty').forEach(button=>button.disabled=false);
   qs('backToRules').disabled=false;qs('loadTitle').focus({preventScroll:true});window.scrollTo({top:0,behavior:'smooth'});
+};
+qs('showCustom').onclick=()=>{qs('landing').classList.add('hidden');qs('customChallenge').classList.remove('hidden');qs('customStart').focus()};
+qs('closeCustom').onclick=()=>{qs('customChallenge').classList.add('hidden');qs('landing').classList.remove('hidden')};
+let creatingCustom=false;
+qs('createCustom').onclick=async()=>{
+  if(creatingCustom)return;
+  const startName=qs('customStart').value.trim(),targetName=qs('customTarget').value.trim();
+  if(!startName||!targetName){qs('customStatus').textContent='Enter both actors using their full credited names.';return}
+  creatingCustom=true;qs('customReady').classList.add('hidden');qs('customStatus').textContent='Verifying an eligible route…';
+  for(const id of ['createCustom','customStart','customTarget','customNoHints','closeCustom'])qs(id).disabled=true;
+  try{
+    const c=await get('/api/challenge/create',{method:'POST',requestTimeoutMs:60000,headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'challenge',start_name:startName,target_name:targetName,hints_enabled:!qs('customNoHints').checked})});
+    qs('customPair').textContent=c.start.name+' → '+c.target.name+' • '+(c.hints_enabled?'Hints allowed':'No hints');
+    qs('customLink').value=c.url;qs('playCustom').setAttribute('href',c.url);qs('customReady').classList.remove('hidden');
+    qs('customStatus').textContent='Connection verified. Your challenge is ready to send; the route stays hidden.';
+  }catch(e){qs('customStatus').textContent=e.message}
+  finally{creatingCustom=false;for(const id of ['createCustom','customStart','customTarget','customNoHints','closeCustom'])qs(id).disabled=false}
+};
+qs('copyCustom').onclick=async()=>{
+  const link=qs('customLink').value;if(!link)return;
+  const text='MAKE THE CUT\n'+qs('customPair').textContent+'\nCan you connect these actors in six moves or fewer?\n'+link;
+  try{await navigator.clipboard.writeText(text);qs('customStatus').textContent='Challenge copied. Paste it into a message.'}
+  catch(_){qs('customLink').focus();qs('customLink').select();qs('customStatus').textContent='Select and copy the challenge link above.'}
 };
 qs('normalGame').onclick=()=>{activeChallengeToken=null;qs('noHints').disabled=false;history.replaceState(null,'',location.pathname);qs('challengeInvite').classList.add('hidden');qs('landing').classList.remove('hidden')};
 qs('retrySync').onclick=async()=>{await recoverAction(Error('Recovering your round'))};

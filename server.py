@@ -111,7 +111,7 @@ def challenge_preview(token):
         item=CHALLENGES.get(token)
         if not item or item['expires']<=time.time(): return None
         return {**{k:item[k] for k in ('start','target','difficulty','hints_enabled','benchmark','expires')},
-                'scoring_version':item.get('scoring_version',1)}
+                'scoring_version':item.get('scoring_version',1),'kind':item.get('kind','score')}
 
 def create_challenge(puzzle_id,puzzle,result):
     with CHALLENGE_LOCK:
@@ -131,6 +131,48 @@ def create_challenge(puzzle_id,puzzle,result):
         tmp.write_text(json.dumps(updated,separators=(',',':')));tmp.replace(CHALLENGES_FILE)
         CHALLENGES.clear();CHALLENGES.update(updated)
         return token
+
+def create_custom_challenge(start_name,target_name,hints_enabled=True):
+    names=[str(start_name or '').strip(),str(target_name or '').strip()]
+    if any(not name or len(name)>100 for name in names):
+        raise ValueError('Enter both actors using their full credited names.')
+    previous=getattr(SEARCH_CONTEXT,'deadline',None)
+    SEARCH_CONTEXT.deadline=time.monotonic()+45
+    try:
+        actors=[person(name) for name in names]
+        for name,actor in zip(names,actors):
+            if not actor or _name_key(actor.get('name',''))!=_name_key(name):
+                raise ValueError('Could not identify '+name+'. Use the full credited name.')
+        start,target=actors
+        if str(start['id'])==str(target['id']):raise ValueError('Choose two different actors.')
+        overall_deadline=SEARCH_CONTEXT.deadline
+        SEARCH_CONTEXT.deadline=min(overall_deadline,time.monotonic()+12)
+        try:route=short_hint_path(start['id'],target['id'],6)
+        except TimeoutError:route=None
+        finally:SEARCH_CONTEXT.deadline=overall_deadline
+        if not route:route=_bounded_bfs(start['id'],target['id'],6,40,35)[0]
+        if not route or not route_allowed_by_overrides(start['id'],route):
+            raise ValueError('No eligible route was verified within six connections. Try another actor pair.')
+        if str(route[-1]['actor']['id'])!=str(target['id']):
+            raise ValueError('Could not verify the selected target.')
+        cut,meta=cut_for('custom',route,start['id'],target['id'])
+        item={'kind':'custom','scoring_version':2,'start':public_person(start),'target':public_person(target),
+              'difficulty':'custom','hints_enabled':bool(hints_enabled),'comparison_route':route,
+              'cut':cut,'cut_meta':meta,'route_status':'verified_route',
+              'route_search':{'scope':'custom_verified_route'},'benchmark':None,
+              'expires':time.time()+CHALLENGE_TTL}
+        token=secrets.token_urlsafe(24)
+        with CHALLENGE_LOCK:
+            updated={k:v for k,v in CHALLENGES.items() if v['expires']>time.time()}
+            updated[token]=item
+            tmp=CHALLENGES_FILE.with_suffix('.tmp')
+            tmp.write_text(json.dumps(updated,separators=(',',':')));tmp.replace(CHALLENGES_FILE)
+            CHALLENGES.clear();CHALLENGES.update(updated)
+        return {'token':token,'url':'https://actor-connection.onrender.com/?challenge='+token,
+                'start':item['start'],'target':item['target'],'hints_enabled':item['hints_enabled'],'verified':True}
+    except TimeoutError as error:
+        raise ValueError('Verification reached its time limit. Retry or choose another actor pair.') from error
+    finally:SEARCH_CONTEXT.deadline=previous
 
 def start_challenge(token):
     with CHALLENGE_LOCK:
@@ -1238,7 +1280,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-short-hint-search-v34','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-custom-actor-challenges-v35','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1375,6 +1417,14 @@ class Handler(SimpleHTTPRequestHandler):
             return self.handle_post(body)
     def handle_post(self,body):
         try:
+            if self.path=='/api/challenge/create':
+                if body.get('mode')!='challenge':return self.send_json({'error':'Custom actor pairs are available only in Challenge Mode.'},400)
+                if 'hints_enabled' in body and type(body['hints_enabled']) is not bool:
+                    return self.send_json({'error':'Invalid hint preference'},400)
+                try:
+                    created=create_custom_challenge(body.get('start_name'),body.get('target_name'),body.get('hints_enabled',True))
+                except ValueError as error:return self.send_json({'error':str(error)},422)
+                return self.send_json(created)
             if self.path in {'/api/validate','/api/move'}:
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 # Legacy stateless validation remains available only when no puzzle is supplied.

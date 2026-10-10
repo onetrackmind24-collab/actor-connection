@@ -49,6 +49,31 @@ function snapshot(degrees, revision, backs = 0) {
 const response = data => ({ok: true, status: 200, json: async () => data});
 
 async function run() {
+  const custom=fixture();
+  custom.nodes.customStart.value='Jack Nicholson';custom.nodes.customTarget.value='Gedde Watanabe';
+  custom.nodes.customNoHints.checked=true;
+  let customRequests=0,releaseCustom;
+  custom.context.fetch=(url,options)=>{
+    customRequests++;assert.equal(url,'/api/challenge/create');
+    assert.deepEqual(JSON.parse(options.body),{mode:'challenge',start_name:'Jack Nicholson',target_name:'Gedde Watanabe',hints_enabled:false});
+    return new Promise(resolve=>releaseCustom=resolve);
+  };
+  const creating=custom.nodes.createCustom.onclick();
+  assert.equal(custom.nodes.createCustom.disabled,true);
+  await custom.nodes.createCustom.onclick();assert.equal(customRequests,1);
+  releaseCustom(response({start:{name:'Jack Nicholson'},target:{name:'Gedde Watanabe'},hints_enabled:false,url:'https://actor-connection.onrender.com/?challenge=custom'}));
+  await creating;
+  assert.equal(custom.nodes.createCustom.disabled,false);
+  assert.match(custom.nodes.customPair.textContent,/Gedde Watanabe.*No hints/);
+  assert.equal(custom.nodes.playCustom.attrs.href,custom.nodes.customLink.value);
+  custom.context.fetch=async()=>({ok:false,status:422,json:async()=>({error:'Pair not verified'})});
+  await custom.nodes.createCustom.onclick();
+  assert.equal(custom.nodes.customStatus.textContent,'Pair not verified');
+  assert.equal(custom.nodes.customReady.classList.contains('hidden'),true);
+  custom.context.fetch=async()=>response({start:{name:'Start'},target:{name:'Target'},difficulty:'custom',hints_enabled:true,benchmark:null,scoring_version:2});
+  await custom.context.loadChallenge('custom');
+  assert.match(custom.nodes.challengeDetails.textContent,/Custom actor challenge/);
+  assert.equal(custom.nodes.acceptChallenge.disabled,false);
   const weekly=fixture();
   weekly.context.fetch=async()=>response({weekly_schedule:{name:'Matt Damon',rotation_enabled:true,
     next_name:'Tom Hanks',changes_at:'2026-10-12T00:00:00-04:00'}});

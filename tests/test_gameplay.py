@@ -468,6 +468,54 @@ class GameplayTests(unittest.TestCase):
             challenge=game.start_challenge(result['challenge_token'])
             self.assertEqual(challenge['target']['id'],original_target)
 
+    def test_custom_challenge_is_private_persisted_and_playable_without_benchmark(self):
+        game=self.game
+        before=set(game.PUZZLES)
+        created=game.create_custom_challenge(self.round['start']['name'],self.round['target']['name'],False)
+        token=created['token']
+        self.assertEqual(set(game.PUZZLES),before)
+        self.assertNotIn('comparison_route',created)
+        self.assertNotIn('cut',created)
+        self.assertIn(token,game.load_challenges())
+        preview=game.challenge_preview(token)
+        self.assertIsNone(preview['benchmark'])
+        self.assertEqual(preview['kind'],'custom')
+        self.assertFalse(preview['hints_enabled'])
+        self.assertNotIn('comparison_route',preview)
+        accepted=game.start_challenge(token)
+        self.pid=accepted['puzzle_id'];self.round=game.PUZZLES[self.pid]
+        self.assertIsNone(self.round['challenge_benchmark'])
+        self.assertEqual(self.request('/api/hint?puzzle_id='+self.pid+'&level=1&route_revision=0')[0],403)
+        for step in self.round['comparison_route']:
+            self.first=step
+            self.assertEqual(self.move()[0],200)
+        status,result=self.request('/api/result',{})
+        self.assertEqual(status,200)
+        self.assertTrue(result['solved'])
+        self.assertNotIn('challenge_outcome',result)
+        self.assertIsNotNone(game.challenge_preview(result['challenge_token'])['benchmark'])
+
+    def test_custom_challenge_rejects_invalid_names_mode_and_unverified_route(self):
+        game=self.game;before=copy.deepcopy(game.CHALLENGES)
+        names={'start_name':self.round['start']['name'],'target_name':self.round['target']['name']}
+        self.assertEqual(self.request('/api/challenge/create',names)[0],400)
+        self.assertEqual(self.request('/api/challenge/create',{'mode':'challenge',**names,'hints_enabled':'false'})[0],400)
+        for start,target in [('',names['target_name']),('Unknown Actor',names['target_name']),
+                             (names['start_name'],names['start_name'])]:
+            self.assertEqual(self.request('/api/challenge/create',{'mode':'challenge','start_name':start,'target_name':target})[0],422)
+        with patch.object(game,'short_hint_path',return_value=None),patch.object(game,'_bounded_bfs',return_value=(None,{})):
+            self.assertEqual(self.request('/api/challenge/create',{'mode':'challenge',**names})[0],422)
+        self.assertEqual(game.CHALLENGES,before)
+
+    def test_custom_short_search_timeout_preserves_broader_verification(self):
+        game=self.game
+        with patch.object(game,'short_hint_path',side_effect=TimeoutError('cold cache')), \
+             patch.object(game,'_bounded_bfs',return_value=(self.round['comparison_route'],{})) as fallback:
+            created=game.create_custom_challenge(self.round['start']['name'],self.round['target']['name'])
+        self.assertTrue(created['verified'])
+        fallback.assert_called_once()
+        self.assertIsNone(getattr(game.SEARCH_CONTEXT,'deadline',None))
+
     def test_weekly_rotation_uses_new_york_monday_and_preserves_roster(self):
         self.game.TARGET_OVERRIDE = ''
         utc = datetime.timezone.utc
