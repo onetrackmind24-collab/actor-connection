@@ -417,11 +417,12 @@ def tmdb(path, params=None):
 
 def person(name):
     if DEMO_MODE: return DEMO_PEOPLE.get(name,{})
-    key='person_'+name.lower()
+    key='person_v2_'+name.lower()
     def load():
         d=tmdb('/search/person',{'query':name,'include_adult':'false','language':'en-US','page':1})
         rows=[x for x in d.get('results',[]) if x.get('known_for_department')=='Acting'] or d.get('results',[])
-        return rows[0] if rows else {}
+        exact=[x for x in rows if _name_key(x.get('name'))==_name_key(name)]
+        return (exact or rows)[0] if rows else {}
     return cached(key,load)
 
 def movies(pid):
@@ -812,7 +813,52 @@ def has_direct_movie_connection(actor_id, target_id):
         return bool(d.get('total_results',0) or d.get('results'))
     return bool(cached(key,load))
 
+def expand_verified_starter(candidate, route, difficulty, target, seconds=6):
+    """Try co-stars of a verified route's first film, never a name allowlist.
+
+    Only the first edge changes; the already validated tail stays intact. Missing
+    photos do not disqualify an actor. A small budget protects round-start latency.
+    """
+    if not route: return candidate,route
+    previous=getattr(SEARCH_CONTEXT,'deadline',None)
+    deadline=time.monotonic()+seconds
+    SEARCH_CONTEXT.deadline=min(previous,deadline) if previous is not None else deadline
+    try:
+        first=route[0]; mid=first['movie']['id']; next_id=str(first['actor']['id'])
+        cast_rows=eligible_cast(mid)
+        # Billing is a starter recognizability heuristic, not an eligibility rule.
+        if difficulty=='beginner': pool=cast_rows[:10]
+        elif difficulty=='expert': pool=cast_rows[10:] or cast_rows
+        else: pool=cast_rows
+        pool=list(pool);secrets.SystemRandom().shuffle(pool)
+        for actor in pool:
+            check_search_budget()
+            aid=str(actor.get('id'))
+            if not actor.get('name') or aid in {next_id,str(target['id'])}: continue
+            if actor['name'] in USED_STARTERS: continue
+            if has_direct_movie_connection(aid,target['id']): continue
+            connection=validate_connection(aid,mid,next_id)
+            if connection:
+                return public_person(actor),[{'movie':first['movie'],'actor':public_person(connection['actor'])}]+route[1:]
+    except (TimeoutError,OSError):
+        # An unavailable discovery service cannot invalidate the verified seed.
+        pass
+    finally:
+        SEARCH_CONTEXT.deadline=previous
+    return candidate,route
+
 def generate_puzzle(difficulty='expert', hints_enabled=True):
+    previous=getattr(SEARCH_CONTEXT,'deadline',None)
+    deadline=time.monotonic()+60
+    SEARCH_CONTEXT.deadline=min(previous,deadline) if previous is not None else deadline
+    try:
+        return _generate_puzzle(difficulty,hints_enabled)
+    except TimeoutError as error:
+        raise RuntimeError('Could not verify a puzzle within the search limit. Retry or choose another level.') from error
+    finally:
+        SEARCH_CONTEXT.deadline=previous
+
+def _generate_puzzle(difficulty='expert', hints_enabled=True):
     cleanup_puzzles()
     difficulty=(difficulty or 'expert').lower()
     if difficulty not in PUZZLE_CANDIDATES: difficulty='expert'
@@ -870,10 +916,11 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
         min_len=2 if DEMO_MODE else {'beginner':2,'intermediate':2,'expert':3}.get(difficulty,2)
         if not route or not (min_len <= len(route) <= 6):
             continue
-        USED_STARTERS.add(candidate_name); save_used_starters(USED_STARTERS)
+        candidate,route=expand_verified_starter(candidate,route,difficulty,target)
+        USED_STARTERS.add(candidate['name']); save_used_starters(USED_STARTERS)
         puzzle_id=secrets.token_urlsafe(12)
         cut,cut_meta=cut_for(difficulty, route, candidate.get('id'), target.get('id'))
-        route_meta={'status':'verified_route','scope':'curated_live_route','stats':{'steps':len(route)}}
+        route_meta={'status':'verified_route','scope':'verified_cast_route','stats':{'steps':len(route)}}
         PUZZLES[puzzle_id]={
             'created':time.time(),'difficulty':difficulty,'hints_enabled':bool(hints_enabled),
             'start':public_person(candidate),'target':public_person(target),
@@ -904,7 +951,8 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
 
     ordered=[names[(start_at+i)%len(names)] for i in range(len(names))]
     fresh=[n for n in ordered if n not in USED_STARTERS]
-    passes=[fresh, ordered] if fresh else [ordered]
+    recycled=[n for n in ordered if n in USED_STARTERS]
+    passes=[fresh,recycled]
     for pass_names in passes:
       for candidate_name in pass_names:
         idx=names.index(candidate_name); candidate=person(candidate_name)
@@ -1056,7 +1104,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-request-timeouts-v24','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-broader-gameplay-v25','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1081,7 +1129,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if not term: return self.send_json([])
                 current=str(puzzle['current_actor']['id'])
-                hits=[m for m in movies(current) if term in str(m.get('title','')).lower() and eligibility_for(m.get('id'),dict(m,id=current))['eligible']]
+                hits=[m for m in movies(current) if _title_key(term) in _title_key(m.get('title','')) and eligibility_for(m.get('id'),dict(m,id=current))['eligible']]
                 return self.send_json([{'id':m.get('id'),'title':m.get('title'),'release_date':m.get('release_date'),'poster_path':m.get('poster_path')} for m in hits[:12]])
             if u.path=='/api/autocomplete/actors':
                 pid=q.get('puzzle_id',[''])[0]; mid=q.get('movie_id',[''])[0]; term=q.get('q',[''])[0].strip().lower()
@@ -1093,7 +1141,7 @@ class Handler(SimpleHTTPRequestHandler):
                 # canonical connection rule so the UI can never offer a choice that
                 # /api/move subsequently rejects for eligibility reasons.
                 hits=[a for a in valid_connection_candidates(current,mid)
-                      if term in str(a.get('name','')).lower()]
+                      if _name_key(term) in _name_key(a.get('name',''))]
                 # Issue a short-lived server-side offer token for each autocomplete result.
                 # If the UI offers a connection and the player selects it, /api/move
                 # accepts that exact server-approved offer without re-querying provider data.

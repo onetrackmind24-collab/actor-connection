@@ -164,7 +164,22 @@ async function run() {
   await f.context.resumeRound('saved');
   assert.equal(f.context.savedRoundCleared,true);
   assert.equal(f.nodes.loadTitle.textContent,'Choose your level');
-  console.log('PASS action recovery, expired rounds, request/body timeouts and resume retry');
+  // Search failures must not look like an empty cast list.
+  {
+    const f=fixture();f.nodes.movieInput.value='Film';
+    f.context.fetch=async()=>{throw Error('offline')};
+    await f.nodes.movieInput.oninput();
+    assert.match(f.nodes.message.innerHTML,/Movie search unavailable/);
+    f.context.fetch=async()=>response([]);
+    await f.nodes.movieInput.oninput();
+    assert.match(f.nodes.message.innerHTML,/No matching eligible movie credits/);
+    await f.context.chooseMovie({id:5,title:'Film'});
+    f.nodes.actorInput.value='Performer';
+    f.context.fetch=async()=>{throw Error('offline')};
+    await f.nodes.actorInput.oninput();
+    assert.match(f.nodes.message.innerHTML,/Actor search unavailable/);
+  }
+  console.log('PASS action recovery, expired rounds, request/body timeouts, resume retry and search feedback');
 }
 
 run().catch(error => {console.error(error); process.exitCode = 1;});

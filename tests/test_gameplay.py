@@ -205,6 +205,67 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(game.score_for(6, 3, 2, 0, 0, False), 5)
         self.assertEqual(game.score_for(6, 3, 2, 0), -20)
 
+    def test_verified_starter_expands_beyond_seed_pool_without_photos(self):
+        game = self.game
+        start = game.person('Michael Shannon')
+        route = game.resolve_curated_route(start, [('Man of Steel','Russell Crowe'),
+                 ('Virtuosity','Denzel Washington'),('Courage Under Fire','Matt Damon')], 'Matt Damon')
+        game.USED_STARTERS.clear()
+        game.USED_STARTERS.add('Michael Shannon')
+        candidate, expanded = game.expand_verified_starter(start, route, 'intermediate', game.person('Matt Damon'))
+        self.assertEqual(candidate['name'], 'Henry Cavill')
+        self.assertIsNone(candidate['profile_path'])
+        self.assertNotIn(candidate['name'], sum(game.PUZZLE_CANDIDATES.values(), []))
+        self.assertEqual(expanded[1:], route[1:])
+        self.assertTrue(game.route_allowed_by_overrides(candidate['id'], expanded))
+        with patch.object(game,'eligible_cast',side_effect=TimeoutError):
+            self.assertEqual(game.expand_verified_starter(start, route, 'expert', game.person('Matt Damon')), (start,route))
+        self.assertIsNone(getattr(game.SEARCH_CONTEXT,'deadline',None))
+
+    def test_full_cast_rules_and_accent_insensitive_autocomplete(self):
+        game = self.game
+        current = str(self.round['current_actor']['id'])
+        movie = {'id':'rules-film','title':"Léon's Film",'release_date':'2000-01-01'}
+        rows = [{'id':current,'name':'Current','character':'Lead'}]
+        rows += [{'id':str(100+i),'name':'Performer '+str(i),'character':'Character'} for i in range(40)]
+        rows += [{'id':'voice','name':'Voice Actor','character':'Narrator (voice)'},
+                 {'id':'self','name':'Self Performer','character':'Self'},
+                 {'id':'blank','name':'José O’Neill','character':''},
+                 {'id':'cameo','name':'Cameo Actor','character':'Role (cameo)'},
+                 {'id':'credits','name':'Credits Actor','character':'Role (post-credits scene)'}]
+        with patch.object(game,'movies',return_value=[movie]), patch.object(game,'cast',return_value=rows):
+            for aid in ('voice','self','blank','139'):
+                status, response = self.request('/api/validate', {'puzzle_id':'','current_actor_id':current,'movie_id':'rules-film','next_actor_id':aid})
+                self.assertEqual(status,200)
+                self.assertTrue(response['valid'], aid)
+            for aid in ('cameo','credits','crew-only',current):
+                self.assertIsNone(game.validate_connection(current,'rules-film',aid))
+            status, movies = self.request('/api/autocomplete/movies?'+urllib.parse.urlencode({'puzzle_id':self.pid,'q':'Leons'}))
+            self.assertEqual(status,200)
+            self.assertEqual(movies[0]['id'],'rules-film')
+            status, actors = self.request('/api/autocomplete/actors?'+urllib.parse.urlencode({'puzzle_id':self.pid,'movie_id':'rules-film','q':'Jose ONeill'}))
+            self.assertEqual(status,200)
+            self.assertEqual(actors[0]['id'],'blank')
+            self.assertTrue(actors[0]['connection_token'])
+
+    def test_person_lookup_prefers_exact_actor_name(self):
+        game = self.game
+        game.DEMO_MODE=False
+        rows=[{'id':1,'name':'Ann Example Jr.','known_for_department':'Acting'},
+              {'id':2,'name':'Ann Example','known_for_department':'Acting'}]
+        with patch.object(game,'tmdb',return_value={'results':rows}):
+            self.assertEqual(game.person('Ann Example')['id'],2)
+
+    def test_puzzle_search_budget_is_restored_after_failure(self):
+        game = self.game
+        def fail(*args):
+            self.assertIsNotNone(game.SEARCH_CONTEXT.deadline)
+            raise TimeoutError('budget expired')
+        with patch.object(game,'_generate_puzzle',side_effect=fail):
+            with self.assertRaisesRegex(RuntimeError,'within the search limit'):
+                game.generate_puzzle('expert')
+        self.assertIsNone(game.SEARCH_CONTEXT.deadline)
+
     def test_weekly_rotation_uses_new_york_monday_and_preserves_roster(self):
         self.game.TARGET_OVERRIDE = ''
         utc = datetime.timezone.utc
