@@ -700,7 +700,7 @@ def candidate_names_for(difficulty,target_name=None):
     if difficulty=='beginner': band=ranked[:max(30,n//3)]
     elif difficulty=='intermediate': band=ranked[max(15,n//5):max(50,(n*3)//4)]
     else: band=ranked[max(30,n//2):] or ranked
-    return [x['name'] for x in band if x['name']!=target_name]
+    return [x['name'] for x in band if x['name']!=target_name and starter_level_allowed(x,difficulty)]
 
 
 
@@ -829,6 +829,20 @@ def has_direct_movie_connection(actor_id, target_id):
         return bool(d.get('total_results',0) or d.get('results'))
     return bool(cached(key,load))
 
+def starter_level_allowed(actor, difficulty):
+    """Familiarity gates affect starters only, never movie connection eligibility.
+
+    Billing and transient provider popularity cannot establish recognizability.
+    Unreviewed cast discoveries belong in Expert until calibrated for lower levels.
+    """
+    if difficulty=='expert': return True
+    names={name for name,_ in CURATED_ALPHA_ROUTES.get('beginner',[])}
+    if difficulty=='intermediate':
+        names.update(name for name,_ in CURATED_ALPHA_ROUTES.get('intermediate',[]))
+        names.update(('Henry Cavill','Amy Adams','Emily Blunt','Rachel McAdams','Jessica Chastain'))
+    if DEMO_MODE: names.update(PUZZLE_CANDIDATES.get(difficulty,[]))
+    return _name_key(actor.get('name','')) in {_name_key(name) for name in names}
+
 def expand_verified_starter(candidate, route, difficulty, target, seconds=6):
     """Try co-stars of a verified route's first film, never a name allowlist.
 
@@ -843,9 +857,8 @@ def expand_verified_starter(candidate, route, difficulty, target, seconds=6):
         first=route[0]; mid=first['movie']['id']; next_id=str(first['actor']['id'])
         cast_rows=eligible_cast(mid)
         # Billing is a starter recognizability heuristic, not an eligibility rule.
-        if difficulty=='beginner': pool=cast_rows[:10]
-        elif difficulty=='expert': pool=cast_rows[10:] or cast_rows
-        else: pool=cast_rows
+        if difficulty=='expert': pool=cast_rows[10:] or cast_rows
+        else: pool=[a for a in cast_rows if starter_level_allowed(a,difficulty)]
         pool=list(pool);secrets.SystemRandom().shuffle(pool)
         for actor in pool:
             check_search_budget()
@@ -922,7 +935,7 @@ def _generate_puzzle(difficulty='expert', hints_enabled=True, *, target_name=Non
     for curated_order in curated_passes:
       for candidate_name,steps in curated_order:
         candidate=person(candidate_name)
-        if not candidate or str(candidate.get('id'))==str(target.get('id')):
+        if not candidate or not starter_level_allowed(candidate,difficulty) or str(candidate.get('id'))==str(target.get('id')):
             continue
         # For the current alpha pool, do not serve a starter who already shares
         # a movie with the weekly target; otherwise every round collapses to Cut 1.
@@ -961,7 +974,7 @@ def _generate_puzzle(difficulty='expert', hints_enabled=True, *, target_name=Non
     # Do not repeat a starting actor until the eligible pool for this difficulty is exhausted.
     # A short mathematical route does not disqualify Expert; recognizability is a separate concern.
     def eligible_route(candidate):
-        if not candidate or str(candidate.get('id'))==str(target.get('id')): return None
+        if not candidate or not starter_level_allowed(candidate,difficulty) or str(candidate.get('id'))==str(target.get('id')): return None
         if has_direct_movie_connection(candidate.get('id'),target.get('id')): return None
         route,route_meta=find_path_with_meta(candidate.get('id'),target.get('id'),6)
         min_len=2 if DEMO_MODE else {'beginner':2,'intermediate':2,'expert':3}.get(difficulty,2)
@@ -1168,7 +1181,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-hinted-movie-scoring-v32','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-starter-difficulty-v33','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)

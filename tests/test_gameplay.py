@@ -205,6 +205,28 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(game.score_for(6, 3, 2, 0, 0, False), 5)
         self.assertEqual(game.score_for(6, 3, 2, 0), -20)
 
+    def test_obscure_cast_discoveries_are_expert_starters_only(self):
+        game=self.game
+        game.DEMO_MODE=False
+        obscure={'id':'obscure','name':'Unknown Supporting Performer','order':0,'popularity':10000}
+        star={'id':'star','name':'Tom Hanks','order':50,'popularity':0}
+        character={'id':'character','name':'Stanley Tucci','order':60,'popularity':0}
+        self.assertFalse(game.starter_level_allowed(obscure,'beginner'))
+        self.assertFalse(game.starter_level_allowed(obscure,'intermediate'))
+        self.assertTrue(game.starter_level_allowed(obscure,'expert'))
+        self.assertTrue(game.starter_level_allowed(star,'beginner'))
+        self.assertTrue(game.starter_level_allowed(character,'intermediate'))
+        self.assertFalse(game.starter_level_allowed(character,'beginner'))
+        route=[{'movie':{'id':1,'title':'Film'},'actor':{'id':'bridge','name':'Bridge'}}]
+        with patch.object(game,'eligible_cast',return_value=[obscure]), \
+             patch.object(game,'has_direct_movie_connection',return_value=False), \
+             patch.object(game,'validate_connection',return_value={'actor':obscure}):
+            for level in ('beginner','intermediate'):
+                chosen,_=game.expand_verified_starter(star,route,level,{'id':'target'})
+                self.assertEqual(chosen['name'],'Tom Hanks')
+            chosen,_=game.expand_verified_starter(star,route,'expert',{'id':'target'})
+            self.assertEqual(chosen['name'],obscure['name'])
+
     def test_verified_starter_expands_beyond_seed_pool_without_photos(self):
         game = self.game
         start = game.person('Michael Shannon')
