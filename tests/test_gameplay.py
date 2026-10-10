@@ -296,7 +296,7 @@ class GameplayTests(unittest.TestCase):
 
     def test_puzzle_search_budget_is_restored_after_failure(self):
         game = self.game
-        def fail(*args):
+        def fail(*args, **kwargs):
             self.assertIsNotNone(game.SEARCH_CONTEXT.deadline)
             raise TimeoutError('budget expired')
         with patch.object(game,'_generate_puzzle',side_effect=fail):
@@ -318,6 +318,64 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(response['error'],'No verified hint route found')
         self.assertEqual(self.round['hints_used'],1)
         self.assertNotIn(actor,self.round['hint_routes'])
+
+    def test_rotation_audit_uses_all_targets_without_changing_game_state(self):
+        game=self.game
+        before=copy.deepcopy(game.PUZZLES)
+        used=set(game.USED_STARTERS)
+        cursor=copy.deepcopy(game.PUZZLE_CURSOR)
+        active_bytes=game.ACTIVE_PUZZLES_FILE.read_bytes()
+        used_bytes=game.USED_STARTERS_FILE.read_bytes()
+        game.verify_weekly_rotation()
+        report=game.rotation_audit_status()
+        self.assertEqual(report['status'],'passed')
+        self.assertEqual(len(report['checks']),27)
+        self.assertEqual({(c['target'],c['difficulty']) for c in report['checks']},
+                         {(n,d) for n in game.WEEKLY_TARGETS for d in ('beginner','intermediate','expert')})
+        self.assertEqual(game.PUZZLES,before)
+        self.assertEqual(game.USED_STARTERS,used)
+        self.assertEqual(game.PUZZLE_CURSOR,cursor)
+        self.assertEqual(game.ACTIVE_PUZZLES_FILE.read_bytes(),active_bytes)
+        self.assertEqual(game.USED_STARTERS_FILE.read_bytes(),used_bytes)
+        self.assertEqual(game.TARGET_OVERRIDE,'Matt Damon')
+        report['checks'][0]['status']='corrupted'
+        self.assertEqual(game.rotation_audit_status()['checks'][0]['status'],'passed')
+
+    def test_two_rotation_cycles_and_old_round_challenge_stay_frozen(self):
+        game=self.game
+        game.TARGET_OVERRIDE=''
+        clock=game.weekly_target
+        original_target=self.round['target']['id']
+        utc=datetime.timezone.utc
+        for week in range(18):
+            # Local Monday midnight changes UTC offset after the DST transition.
+            day=game.WEEKLY_EPOCH+datetime.timedelta(weeks=week)
+            now=datetime.datetime.combine(day,datetime.time(),tzinfo=game.WEEKLY_ZONE)
+            before=clock(now-datetime.timedelta(microseconds=1))
+            schedule=clock(now)
+            self.assertEqual(schedule['name'],game.WEEKLY_TARGETS[week%9])
+            self.assertEqual(before['name'],game.WEEKLY_TARGETS[(week-1)%9])
+            self.assertTrue(schedule['rotation_enabled'])
+            for level in ('beginner','intermediate','expert'):
+                with patch.object(game,'weekly_target',return_value=schedule):
+                    generated=game.generate_puzzle(level)
+                    self.assertEqual(generated['target']['name'],schedule['name'])
+                    status,old=self.request('/api/round?puzzle_id='+self.pid)
+                    self.assertEqual(status,200)
+                    self.assertEqual(old['target']['id'],original_target)
+        for step in self.round['comparison_route']:
+            status,response=self.request('/api/move',{'route_revision':self.round.get('route_revision',0),
+                'movie_id':step['movie']['id'],'next_actor_id':step['actor']['id']})
+            self.assertEqual(status,200)
+        status,result=self.request('/api/result',{})
+        self.assertEqual(status,200)
+        self.assertTrue(result['solved'])
+        with patch.object(game,'weekly_target',return_value={'name':'Angelina Jolie'}):
+            status,preview=self.request('/api/challenge?token='+result['challenge_token'])
+            self.assertEqual(status,200)
+            self.assertEqual(preview['target']['id'],original_target)
+            challenge=game.start_challenge(result['challenge_token'])
+            self.assertEqual(challenge['target']['id'],original_target)
 
     def test_weekly_rotation_uses_new_york_monday_and_preserves_roster(self):
         self.game.TARGET_OVERRIDE = ''

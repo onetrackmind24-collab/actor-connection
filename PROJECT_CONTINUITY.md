@@ -288,3 +288,11 @@ Continued gameplay review after v27 keyboard validation in the live browser (Den
 - Added an offline provider-backed regression covering undated-film search, voice connection offers, stale cache isolation, malformed-row exclusion, and cameo/crew rejection.
 - Previous v28 live browser verification completed: Melissa Leo -> The Big Short -> Brad Pitt -> Se7en -> Morgan Freeman -> Invictus -> Matt Damon; 3 degrees, 2 hints, score 80. New Game returned to difficulty selection with focus, fresh Intermediate Jack Kehler counters and controls reset, and that round survived refresh after deployment. Cleared the stale Connection accepted message on New Game.
 - Remaining launch work: wider credit exception curation, mobile/Safari human testing, starter coverage expansion and difficulty calibration. All eligible performers are intended to be playable; do not claim every provider credit or generated starter is exhaustively verified.
+
+
+## October 10 — repeated weekly rotation verification (v30)
+
+- Added internal explicit-target dry-run generation using the same real generator and starter expansion as normal play. HTTP puzzle requests cannot override targets. Dry runs do not consume starter history, advance cursors, create rounds, write results or challenges, or overwrite active-round files.
+- Startup sequential background audit verifies all nine roster targets at Beginner, Intermediate and Expert against live provider credits. /api/status rotation_verification reports pending/passed/failed per combination without revealing solution routes. Overall pass requires every generated route to validate and reach its requested target within 2–6 connections. This is live generation evidence rather than only demo fixture coverage.
+- Added regressions for two complete nine-week cycles, every difficulty, exact Monday boundaries including DST offset, active-round target preservation, and friend challenge target preservation after weekly changes. Added audit isolation and snapshot integrity checks.
+- Confirmed production rotation_enabled=true, next change 2026-10-12T00:00:00-04:00. Live audit outcome must be checked after deployment; do not claim all 27 live cases passed before report completion.

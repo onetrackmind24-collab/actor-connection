@@ -853,22 +853,22 @@ def expand_verified_starter(candidate, route, difficulty, target, seconds=6):
         SEARCH_CONTEXT.deadline=previous
     return candidate,route
 
-def generate_puzzle(difficulty='expert', hints_enabled=True):
+def generate_puzzle(difficulty='expert', hints_enabled=True, *, target_name=None, dry_run=False):
     previous=getattr(SEARCH_CONTEXT,'deadline',None)
     deadline=time.monotonic()+60
     SEARCH_CONTEXT.deadline=min(previous,deadline) if previous is not None else deadline
     try:
-        return _generate_puzzle(difficulty,hints_enabled)
+        return _generate_puzzle(difficulty,hints_enabled,target_name=target_name,dry_run=dry_run)
     except TimeoutError as error:
         raise RuntimeError('Could not verify a puzzle within the search limit. Retry or choose another level.') from error
     finally:
         SEARCH_CONTEXT.deadline=previous
 
-def _generate_puzzle(difficulty='expert', hints_enabled=True):
-    cleanup_puzzles()
+def _generate_puzzle(difficulty='expert', hints_enabled=True, *, target_name=None, dry_run=False):
+    if not dry_run: cleanup_puzzles()
     difficulty=(difficulty or 'expert').lower()
     if difficulty not in PUZZLE_CANDIDATES: difficulty='expert'
-    target_name=weekly_target()['name']
+    target_name=target_name or weekly_target()['name']
     target=person(target_name)
     if not target: raise RuntimeError('Weekly target could not be loaded')
     # First try the tiny curated alpha pool for this difficulty BEFORE building
@@ -923,6 +923,9 @@ def _generate_puzzle(difficulty='expert', hints_enabled=True):
         if not route or not (min_len <= len(route) <= 6):
             continue
         candidate,route=expand_verified_starter(candidate,route,difficulty,target)
+        if dry_run:
+            return {'difficulty':difficulty,'start':public_person(candidate),'target':public_person(target),
+                    'comparison_route':route,'verified':True}
         USED_STARTERS.add(candidate['name']); save_used_starters(USED_STARTERS)
         puzzle_id=secrets.token_urlsafe(12)
         cut,cut_meta=cut_for(difficulty, route, candidate.get('id'), target.get('id'))
@@ -965,6 +968,9 @@ def _generate_puzzle(difficulty='expert', hints_enabled=True):
         result=eligible_route(candidate)
         if result is not None:
             route,route_meta=result
+            if dry_run:
+                return {'difficulty':difficulty,'start':public_person(candidate),'target':public_person(target),
+                        'comparison_route':route,'verified':True}
             PUZZLE_CURSOR[difficulty]=(idx+1)%len(names)
             USED_STARTERS.add(candidate_name); save_used_starters(USED_STARTERS)
             puzzle_id=secrets.token_urlsafe(12)
@@ -987,6 +993,48 @@ def _generate_puzzle(difficulty='expert', hints_enabled=True):
                 # Answer data intentionally stays server-side until the round is submitted.
             }
     raise RuntimeError('No candidate in this difficulty pool passed the <=6 verification gate')
+
+
+
+ROTATION_AUDIT_LOCK=threading.Lock()
+ROTATION_AUDIT={'status':'not_started','mode':'demo' if DEMO_MODE else 'live','checks':[]}
+
+def rotation_audit_status():
+    with ROTATION_AUDIT_LOCK:
+        return json.loads(json.dumps(ROTATION_AUDIT))
+
+def verify_weekly_rotation():
+    """Exercise the real generator without creating rounds or consuming starters.
+
+    Explicit target arguments are internal only; HTTP clients cannot change the
+    weekly schedule. One sequential worker shares provider caches with gameplay.
+    """
+    checks=[{'target':name,'difficulty':level,'status':'pending'}
+            for name in WEEKLY_TARGETS for level in ('beginner','intermediate','expert')]
+    with ROTATION_AUDIT_LOCK:
+        if ROTATION_AUDIT['status']=='running': return
+        ROTATION_AUDIT.update(status='running',started_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),checks=checks)
+    for index,check in enumerate(checks):
+        try:
+            puzzle=generate_puzzle(check['difficulty'],target_name=check['target'],dry_run=True)
+            if puzzle['target']['name']!=check['target']:
+                raise RuntimeError('Generator returned the wrong weekly target')
+            route=puzzle['comparison_route']
+            current=puzzle['start']['id']
+            for step in route:
+                if validate_connection(current,step['movie']['id'],step['actor']['id']) is None:
+                    raise RuntimeError('Generated comparison route failed eligibility validation')
+                current=step['actor']['id']
+            if str(current)!=str(puzzle['target']['id']) or not 2<=len(route)<=6:
+                raise RuntimeError('Generated route does not reach the requested target in 2–6 connections')
+            completed={**check,'status':'passed','start':puzzle['start']['name'],'degrees':len(route)}
+        except Exception as error:
+            completed={**check,'status':'failed','error':str(error)}
+        with ROTATION_AUDIT_LOCK:
+            ROTATION_AUDIT['checks'][index]=completed
+    with ROTATION_AUDIT_LOCK:
+        ROTATION_AUDIT['status']='passed' if all(c['status']=='passed' for c in ROTATION_AUDIT['checks']) else 'failed'
+        ROTATION_AUDIT['completed_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def route_allowed_by_overrides(start_id, route):
@@ -1110,7 +1158,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-complete-movie-credits-v29','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-live-rotation-verification-v30','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1363,4 +1411,5 @@ if __name__=='__main__':
     print(f'Actor Connection listening on {host}:{port}')
     print('Data mode:', 'zero-setup demo' if DEMO_MODE else 'live movie database')
     print('Disk cache:', CACHE_DIR)
+    threading.Thread(target=verify_weekly_rotation,name='weekly-rotation-verification',daemon=True).start()
     ThreadingHTTPServer((host,port),Handler).serve_forever()
