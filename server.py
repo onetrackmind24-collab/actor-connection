@@ -15,7 +15,9 @@ CACHE_DIR=STATE_DIR/'cache'; CACHE_DIR.mkdir(exist_ok=True)
 TMDB='https://api.themoviedb.org/3'
 TOKEN=os.environ.get('TMDB_API_TOKEN','').strip()
 TARGET_OVERRIDE=os.environ.get('WEEKLY_TARGET','').strip()
-WEEKLY_TARGETS=('Matt Damon','Tom Hanks','Morgan Freeman','Denzel Washington')
+WEEKLY_TARGETS=('Matt Damon','Tom Hanks','Morgan Freeman','Denzel Washington',
+                'Michael Caine','Clint Eastwood','Jack Nicholson',
+                'Scarlett Johansson','Angelina Jolie')
 WEEKLY_ZONE=ZoneInfo('America/New_York')
 WEEKLY_EPOCH=datetime.date(2026,10,5)
 
@@ -335,6 +337,12 @@ DEMO_PEOPLE={
  'John Goodman':{'id':'p15','name':'John Goodman','profile_path':None},
  'Steve Buscemi':{'id':'p16','name':'Steve Buscemi','profile_path':None},
  'Morgan Freeman':{'id':'p17','name':'Morgan Freeman','profile_path':None},
+ 'Michael Caine':{'id':'p18','name':'Michael Caine','profile_path':None},
+ 'Clint Eastwood':{'id':'p19','name':'Clint Eastwood','profile_path':None},
+ 'Jack Nicholson':{'id':'p20','name':'Jack Nicholson','profile_path':None},
+ 'Scarlett Johansson':{'id':'p21','name':'Scarlett Johansson','profile_path':None},
+ 'Angelina Jolie':{'id':'p22','name':'Angelina Jolie','profile_path':None},
+
 }
 DEMO_MOVIES={
  'm1':{'id':'m1','title':'Man of Steel','release_date':'2013-06-14','popularity':100,'poster_path':None,'actors':['Michael Shannon','Russell Crowe','Henry Cavill']},
@@ -351,6 +359,13 @@ DEMO_MOVIES={
  'm12':{'id':'m12','title':'Flight','release_date':'2012-11-02','popularity':90,'poster_path':None,'actors':['Denzel Washington','John Goodman']},
  'm13':{'id':'m13','title':'Glory','release_date':'1989-12-15','popularity':90,'poster_path':None,'actors':['Denzel Washington','Morgan Freeman']},
 }
+# Offline fixtures for the additional live-validated Morgan Freeman bridges.
+# Popularity values are synthetic demo data, not provider measurements.
+DEMO_MOVIES['m14']={'id':'m14','title':'Batman Begins','release_date':'','popularity':50,'poster_path':None,'actors':['Morgan Freeman','Michael Caine']}
+DEMO_MOVIES['m15']={'id':'m15','title':'Unforgiven','release_date':'','popularity':50,'poster_path':None,'actors':['Morgan Freeman','Clint Eastwood']}
+DEMO_MOVIES['m16']={'id':'m16','title':'The Bucket List','release_date':'','popularity':50,'poster_path':None,'actors':['Morgan Freeman','Jack Nicholson']}
+DEMO_MOVIES['m17']={'id':'m17','title':'Lucy','release_date':'','popularity':50,'poster_path':None,'actors':['Morgan Freeman','Scarlett Johansson']}
+DEMO_MOVIES['m18']={'id':'m18','title':'Wanted','release_date':'','popularity':50,'poster_path':None,'actors':['Morgan Freeman','Angelina Jolie']}
 # Glory cast verified against https://www.sonypictures.com/movies/glory
 DEMO_BY_ID={str(v['id']):v for v in DEMO_PEOPLE.values()}
 DEMO_NAME_BY_ID={str(v['id']):k for k,v in DEMO_PEOPLE.items()}
@@ -807,6 +822,11 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
     # Every step is still checked against live provider credits before serving.
     curated=CURATED_ALPHA_ROUTES.get(difficulty,[])
     target_bridges={
+        'Michael Caine':[('Batman Begins','Michael Caine')],
+        'Clint Eastwood':[('Unforgiven','Clint Eastwood')],
+        'Jack Nicholson':[('The Bucket List','Jack Nicholson')],
+        'Scarlett Johansson':[('Lucy','Scarlett Johansson')],
+        'Angelina Jolie':[('Wanted','Angelina Jolie')],
         'Denzel Washington':[('Glory','Denzel Washington')],
         'Matt Damon':[('Invictus','Matt Damon')],
         'Tom Hanks':[('Gone Baby Gone','Ed Harris'),('Apollo 13','Tom Hanks')]
@@ -1030,7 +1050,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-starter-variety-v21','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-expanded-roster-v22','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)

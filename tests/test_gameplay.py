@@ -145,13 +145,33 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(attempted[-1], entries[0][0])
         self.assertEqual(game.CURATED_ALPHA_ROUTES, original)
 
+    def test_every_weekly_target_has_a_playable_round_in_each_difficulty(self):
+        game = self.game
+        for target in game.WEEKLY_TARGETS:
+            game.TARGET_OVERRIDE = target
+            for difficulty in ('beginner', 'intermediate', 'expert'):
+                with self.subTest(target=target, difficulty=difficulty):
+                    game.USED_STARTERS.clear()
+                    puzzle = game.generate_puzzle(difficulty)
+                    stored = game.PUZZLES[puzzle['puzzle_id']]
+                    route = stored['comparison_route']
+                    self.assertEqual(puzzle['target']['name'], target)
+                    self.assertNotEqual(puzzle['start']['id'], puzzle['target']['id'])
+                    self.assertTrue(2 <= len(route) <= 6)
+                    current = puzzle['start']['id']
+                    for step in route:
+                        self.assertIsNotNone(game.validate_connection(current, step['movie']['id'], step['actor']['id']))
+                        current = step['actor']['id']
+                    self.assertEqual(current, puzzle['target']['id'])
+                    self.assertFalse(game.has_direct_movie_connection(puzzle['start']['id'], puzzle['target']['id']))
+
     def test_weekly_rotation_uses_new_york_monday_and_preserves_roster(self):
         self.game.TARGET_OVERRIDE = ''
         utc = datetime.timezone.utc
         self.assertEqual(self.game.weekly_target(datetime.datetime(2026, 10, 12, 3, 59, tzinfo=utc))['name'], 'Matt Damon')
         for day, name in [(12, 'Tom Hanks'), (19, 'Morgan Freeman'), (26, 'Denzel Washington')]:
             self.assertEqual(self.game.weekly_target(datetime.datetime(2026, 10, day, 4, tzinfo=utc))['name'], name)
-        self.assertEqual(self.game.weekly_target(datetime.datetime(2026, 11, 2, 5, tzinfo=utc))['name'], 'Matt Damon')
+        self.assertEqual(self.game.weekly_target(datetime.datetime(2026, 11, 2, 5, tzinfo=utc))['name'], 'Michael Caine')
 
 
 if __name__ == '__main__':
