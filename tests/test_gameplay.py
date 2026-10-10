@@ -266,6 +266,21 @@ class GameplayTests(unittest.TestCase):
                 game.generate_puzzle('expert')
         self.assertIsNone(game.SEARCH_CONTEXT.deadline)
 
+    def test_cached_hint_cannot_exceed_remaining_moves_or_charge_for_failure(self):
+        game = self.game
+        path = self.round['comparison_route']
+        actor = str(self.round['current_actor']['id'])
+        self.round.update(live_route=[self.first]*5, hints_used=1,
+                          hint_routes={actor:path})
+        self.assertGreater(len(path),1)
+        with patch.object(game,'known_finish_route',return_value=None), \
+             patch.object(game,'bounded_hint_path',return_value=None):
+            status, response = self.request('/api/hint?'+urllib.parse.urlencode({'puzzle_id':self.pid,'level':2,'route_revision':0}))
+        self.assertEqual(status,404)
+        self.assertEqual(response['error'],'No verified hint route found')
+        self.assertEqual(self.round['hints_used'],1)
+        self.assertNotIn(actor,self.round['hint_routes'])
+
     def test_weekly_rotation_uses_new_york_monday_and_preserves_roster(self):
         self.game.TARGET_OVERRIDE = ''
         utc = datetime.timezone.utc
