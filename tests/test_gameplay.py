@@ -255,6 +255,13 @@ class GameplayTests(unittest.TestCase):
               {'id':2,'name':'Ann Example','known_for_department':'Acting'}]
         with patch.object(game,'tmdb',return_value={'results':rows}):
             self.assertEqual(game.person('Ann Example')['id'],2)
+        rows[1]['known_for_department']='Directing'
+        with patch.object(game,'tmdb',return_value={'results':rows}):
+            self.assertEqual(game.person('Ann Example Writer')['id'],1)
+            # A new exact query avoids the already cached actor response.
+            game.MEM.clear()
+            (game.CACHE_DIR / 'person_v3_ann_example.json').unlink(missing_ok=True)
+            self.assertEqual(game.person('Ann Example')['id'],2)
 
     def test_puzzle_search_budget_is_restored_after_failure(self):
         game = self.game

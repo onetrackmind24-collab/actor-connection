@@ -417,12 +417,16 @@ def tmdb(path, params=None):
 
 def person(name):
     if DEMO_MODE: return DEMO_PEOPLE.get(name,{})
-    key='person_v2_'+name.lower()
+    key='person_v3_'+name.lower()
     def load():
         d=tmdb('/search/person',{'query':name,'include_adult':'false','language':'en-US','page':1})
-        rows=[x for x in d.get('results',[]) if x.get('known_for_department')=='Acting'] or d.get('results',[])
+        rows=d.get('results',[])
         exact=[x for x in rows if _name_key(x.get('name'))==_name_key(name)]
-        return (exact or rows)[0] if rows else {}
+        acting=[x for x in rows if x.get('known_for_department')=='Acting']
+        # A performer may be best known as a director/writer. Their movie CAST
+        # credits decide eligibility; their primary occupation is not a ban.
+        preferred=[x for x in exact if x.get('known_for_department')=='Acting'] or exact or acting or rows
+        return preferred[0] if preferred else {}
     return cached(key,load)
 
 def movies(pid):
