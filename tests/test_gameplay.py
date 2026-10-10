@@ -121,6 +121,30 @@ class GameplayTests(unittest.TestCase):
         self.assertTrue(recovered['finished'])
         self.assertEqual(recovered['final_result'], result)
 
+    def test_curated_selection_tries_fresh_then_recycled_once(self):
+        game = self.game
+        original = copy.deepcopy(game.CURATED_ALPHA_ROUTES)
+        entries = game.CURATED_ALPHA_ROUTES['beginner']
+        game.USED_STARTERS.clear()
+        game.USED_STARTERS.add(entries[0][0])
+        attempted = []
+        real_person = game.person
+
+        def observe(name):
+            if name != 'Matt Damon':
+                attempted.append(name)
+            return real_person(name)
+
+        with patch.object(game, 'person', side_effect=observe), \
+             patch.object(game, 'has_direct_movie_connection', return_value=False), \
+             patch.object(game, 'resolve_curated_route', return_value=None), \
+             patch.object(game, 'candidate_names_for', return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, 'No starting-actor'):
+                game.generate_puzzle('beginner')
+        self.assertEqual(sorted(attempted), sorted(name for name, _ in entries))
+        self.assertEqual(attempted[-1], entries[0][0])
+        self.assertEqual(game.CURATED_ALPHA_ROUTES, original)
+
     def test_weekly_rotation_uses_new_york_monday_and_preserves_roster(self):
         self.game.TARGET_OVERRIDE = ''
         utc = datetime.timezone.utc

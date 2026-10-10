@@ -824,9 +824,13 @@ def generate_puzzle(difficulty='expert', hints_enabled=True):
     # dropping into the expensive live graph crawl. This keeps repeated alpha
     # games fast even after the no-repeat pool has been used up.
     fresh=[x for x in curated if x[0] not in USED_STARTERS]
-    curated_passes=[fresh]
-    if fresh != curated:
-        curated_passes.append(curated)
+    # Shuffle copies while keeping unseen starters ahead of recycled ones.
+    # Failed fresh entries are tried only once before the catalog fallback.
+    recycled=[x for x in curated if x[0] in USED_STARTERS]
+    rng=secrets.SystemRandom()
+    rng.shuffle(fresh)
+    rng.shuffle(recycled)
+    curated_passes=[fresh,recycled]
     for curated_order in curated_passes:
       for candidate_name,steps in curated_order:
         candidate=person(candidate_name)
@@ -1026,7 +1030,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-route-recovery-v20','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-starter-variety-v21','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
