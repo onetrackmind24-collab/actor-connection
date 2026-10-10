@@ -178,15 +178,24 @@ function setActorImage(id,path){
   try{el.src=img(path)}catch(_){try{el.src=placeholder()}catch(__){}}
 }
 async function get(url,options={}){
-  let r;
-  try{r=await fetch(url,{cache:'no-store',...options})}catch(_){throw Error('Could not reach the game server. Check your connection and retry.')}
-  let d;
-  try{d=await r.json()}catch(_){
-    if(!r.ok)throw Error('Game server temporarily unavailable (HTTP '+r.status+'). Retry in a moment.');
-    throw Error('The game server returned an unreadable response. Retry in a moment.');
-  }
-  if(!r.ok||d.error)throw Error(d.error||'Request failed (HTTP '+r.status+')');
-  return d;
+  const {requestTimeoutMs=30000,...fetchOptions}=options;
+  const controller=new AbortController();let timedOut=false;
+  const deadline=setTimeout(()=>{timedOut=true;controller.abort()},requestTimeoutMs);
+  try{
+    let r;
+    try{r=await fetch(url,{cache:'no-store',...fetchOptions,signal:controller.signal})}catch(_){
+      if(timedOut)throw Error('The game server took too long to respond. Retry in a moment.');
+      throw Error('Could not reach the game server. Check your connection and retry.');
+    }
+    let d;
+    try{d=await r.json()}catch(_){
+      if(timedOut)throw Error('The game server took too long to respond. Retry in a moment.');
+      if(!r.ok)throw Error('Game server temporarily unavailable (HTTP '+r.status+'). Retry in a moment.');
+      throw Error('The game server returned an unreadable response. Retry in a moment.');
+    }
+    if(!r.ok||d.error){const error=Error(d.error||'Request failed (HTTP '+r.status+')');error.status=r.status;throw error}
+    return d;
+  }finally{clearTimeout(deadline)}
 }
 function hintError(error){
   const reason=error?.message||'Request failed. Please retry.';
@@ -300,7 +309,10 @@ function applyHintMode(enabled){
   for(const id of ['hint1','hint2']){qs(id).disabled=!enabled;qs(id).classList.toggle('hidden',!enabled)}
   qs('difficultyBadge').textContent=difficulty+(enabled?'':' • No hints');
 }
+let startingRound=false;
 async function begin(level){
+  if(startingRound)return;
+  startingRound=true;qs('backToRules').disabled=true;
   const hintsEnabled=!qs('noHints').checked;
   difficulty=level;
   const loadingStarted=performance.now();
@@ -309,7 +321,7 @@ async function begin(level){
     qs('loadTitle').textContent='Loading…';qs('loadText').textContent='Verifying a six-degree route before the puzzle starts.';document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);
     let st=await get('/api/status');if(!st.ready)throw Error('The game server is not configured yet.');
     const puzzleUrl=activeChallengeToken?'/api/puzzle?challenge='+encodeURIComponent(activeChallengeToken):'/api/puzzle?difficulty='+encodeURIComponent(level)+'&hints='+(hintsEnabled?'on':'off');
-    let puzzle=await get(puzzleUrl);if(!puzzle.verified)throw Error('Puzzle verification failed.');
+    let puzzle=await get(puzzleUrl,{requestTimeoutMs:90000});if(!puzzle.verified)throw Error('Puzzle verification failed.');
     await new Promise(resolve=>setTimeout(resolve,Math.max(0,700-(performance.now()-loadingStarted))));
     qs('levelClapper').classList.add('clap-once');
     if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches)await new Promise(resolve=>setTimeout(resolve,240));
@@ -320,7 +332,7 @@ async function begin(level){
     qs('challengeInvite').classList.add('hidden');
     qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();if(challengeBenchmark)msg(challengeBenchmark.solved?'Score to beat: '+challengeBenchmark.points+'. Same actors, difficulty and hint mode.':'Your friend did not reach the target. Finish this puzzle to win.');timer=setInterval(()=>{seconds++;stats()},1000);
   }catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}
-  finally{qs('levelClapper').classList.add('hidden');qs('loading').setAttribute('aria-busy','false')}
+  finally{startingRound=false;qs('backToRules').disabled=false;qs('levelClapper').classList.add('hidden');qs('loading').setAttribute('aria-busy','false')}
 }
 qs('showDifficulty').onclick=()=>{qs('landing').classList.add('hidden');qs('loading').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
 qs('backToRules').onclick=()=>{qs('loading').classList.add('hidden');qs('landing').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
@@ -368,19 +380,15 @@ async function resumeRound(id){
   qs('loadText').textContent='Recovering your saved route and hints.';
   document.querySelectorAll('.difficulty').forEach(b=>b.disabled=true);
   try{
-    const r=await fetch('/api/round?puzzle_id='+encodeURIComponent(id),{cache:'no-store'});
-    const d=await r.json();
-    if(r.status===404||r.status===409){
-      rememberRound(null);
-      qs('loadTitle').textContent='Choose your level';
-      qs('loadText').textContent=r.status===409?'Your previous round has ended.':'Your previous round expired. Rounds are kept for six hours.';
-      document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);
-      return;
-    }
-    if(!r.ok||d.error)throw Error(d.error||'Could not restore round');
+    const d=await get('/api/round?puzzle_id='+encodeURIComponent(id));
     await applyRoundSnapshot(d);
     if(!d.finished)msg('Your round has been restored.','ok');
   }catch(e){
+    if(e.status===404||e.status===409){
+      rememberRound(null);qs('loadTitle').textContent='Choose your level';
+      qs('loadText').textContent=e.status===409?'Your previous round has ended.':'Your previous round expired. Rounds are kept for six hours.';
+      document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);return;
+    }
     if(pendingFinish){
       for(const key of ['connect','back','hint1','hint2','giveUp'])qs(key).disabled=true;
       qs('movieInput').disabled=true;qs('actorInput').disabled=true;msg(e.message,'bad');return;

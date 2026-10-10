@@ -23,6 +23,7 @@ function fixture() {
   }
   const context = {
     document: {getElementById: id => nodes[id], querySelectorAll: () => []},
+    AbortController, setTimeout, clearTimeout,
     URLSearchParams, location: {search: ''},
     sessionStorage: {getItem: () => null, removeItem() { context.savedRoundCleared = true; }},
     clearedTimers: 0,
@@ -111,7 +112,59 @@ async function run() {
   assert.equal(nodes.loadTitle.textContent, 'Choose your level');
   assert.equal(nodes.gameShell.classList.contains('hidden'), true);
   assert.equal(nodes.loading.classList.contains('hidden'), false);
-  console.log('PASS dropped move recovery, failed back recovery, blocked retries and stale hint recovery');
+  // A request can stall before headers or while reading the response body.
+  for (const stalledBody of [false, true]) {
+    const f = fixture();let fireDeadline;let deadlineCleared=false;
+    f.context.setTimeout = callback => {fireDeadline=callback;return 123;};
+    f.context.clearTimeout = id => {assert.equal(id,123);deadlineCleared=true;};
+    f.context.fetch = async (url, options) => {
+      const stalled = () => new Promise((resolve,reject) => {
+        options.signal.addEventListener('abort',()=>reject(Error('aborted')));
+      });
+      if(stalledBody)return {ok:true,status:200,json:stalled};
+      return stalled();
+    };
+    const request = f.context.get('/api/status');
+    await new Promise(resolve=>setImmediate(resolve));fireDeadline();
+    await assert.rejects(request,/took too long/);
+    assert.equal(deadlineCleared,true);
+  }
+  // A stalled puzzle request releases the clapper and difficulty controls.
+  {
+    const f=fixture();const buttons=[{disabled:false}];let deadline;let puzzleRequests=0;
+    f.context.document.querySelectorAll=()=>buttons;
+    f.context.performance={now:()=>0};
+    f.context.setTimeout=(callback,ms)=>{deadline=callback;return ms;};
+    f.context.clearTimeout=()=>{};
+    f.context.fetch=async(url,options)=>{
+      if(url==='/api/status')return response({ready:true});
+      puzzleRequests++;
+      return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(Error('aborted'))));
+    };
+    const starting=f.context.begin('beginner');
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(buttons[0].disabled,true);
+    assert.equal(f.nodes.backToRules.disabled,true);
+    await f.context.begin('expert');
+    assert.equal(puzzleRequests,1);
+    deadline();await starting;
+    assert.equal(buttons[0].disabled,false);
+    assert.equal(f.nodes.backToRules.disabled,false);
+    assert.equal(f.nodes.levelClapper.classList.contains('hidden'),true);
+    assert.equal(vm.runInContext('startingRound',f.context),false);
+    assert.equal(f.nodes.loadTitle.textContent,'Could not start game');
+  }
+  // Resume failures keep the saved round; an actual expiry clears it.
+  const f=fixture();
+  f.context.fetch=async()=>{throw Error('offline')};
+  await f.context.resumeRound('saved');
+  assert.notEqual(f.context.savedRoundCleared,true);
+  assert.equal(f.nodes.loadTitle.textContent,'Could not restore your round');
+  f.context.fetch=async()=>({ok:false,status:404,json:async()=>({error:'Puzzle expired or unknown'})});
+  await f.context.resumeRound('saved');
+  assert.equal(f.context.savedRoundCleared,true);
+  assert.equal(f.nodes.loadTitle.textContent,'Choose your level');
+  console.log('PASS action recovery, expired rounds, request/body timeouts and resume retry');
 }
 
 run().catch(error => {console.error(error); process.exitCode = 1;});
