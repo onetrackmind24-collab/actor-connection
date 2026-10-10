@@ -473,7 +473,7 @@ qs('newGame').onclick=()=>{
   clearInterval(timer);rememberRound(null);
   activeChallengeToken=null;challengeBenchmark=null;roundFinished=false;roundSyncRequired=false;
   puzzleId=null;routeRevision=0;degree=0;hints=0;seconds=0;freeBacks=1;route=[];selectedMovie=selectedActor=null;
-  resultShareText='';closeDrop('movie',true);closeDrop('actor',true);
+  resultShareText='';closeDrop('movie',true);closeDrop('actor',true);msg('');
   qs('noHints').disabled=false;qs('shareFallback').classList.add('hidden');qs('shareStatus').textContent='';
   const url=new URL(location.href);url.searchParams.delete('challenge');history.replaceState(null,'',url.pathname+url.search+url.hash);
   for(const id of ['result','gameShell','landing','challengeInvite','retryResult','retrySync'])qs(id).classList.add('hidden');
