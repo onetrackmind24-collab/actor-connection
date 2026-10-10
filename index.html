@@ -84,7 +84,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
         <circle cx="23" cy="43" r="4" fill="currentColor"/>
       </svg>
     </div>
-    <h2 id="loadTitle">Choose your level</h2>
+    <h2 id="loadTitle" tabindex="-1">Choose your level</h2>
     <p id="loadText">The puzzle is verified before play begins.</p>
     <label style="display:block;margin:16px 0"><input type="checkbox" id="noHints"> Play without hints</label>
     <div class="difficulty-grid">
@@ -144,11 +144,11 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 
     <section class="panel result hidden" id="result">
       <div class="eyebrow gold">Round complete</div>
-      <h2 id="resultTitle"></h2>
+      <h2 id="resultTitle" tabindex="-1"></h2>
       <div id="resultText"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:18px">
         <button class="btn" id="shareResult">Challenge a Friend</button>
-        <button class="btn primary" onclick="location.reload()">Play Again</button>
+        <button class="btn primary" id="newGame">New Game</button>
       </div>
       <p id="shareStatus" aria-live="polite"></p>
       <textarea id="shareFallback" class="hidden" aria-label="Result to copy" readonly style="width:100%;min-height:140px"></textarea>
@@ -158,7 +158,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 <script>
 const IMG='https://image.tmdb.org/t/p/w342';
 const qs=id=>document.getElementById(id);
-let pendingFinish=null,roundSyncRequired=false,routeRevision=0;
+let pendingFinish=null,roundSyncRequired=false,routeRevision=0,roundFinished=false;
 let start,target,current,puzzleId=null,degree=0,hints=0,seconds=0,timer,route=[],selectedMovie,selectedActor,movieSeq=0,actorSeq=0,freeBacks=1,difficulty='expert';
 let resultShareText='';
 let activeChallengeToken=null;
@@ -237,7 +237,7 @@ function closeDrop(kind,cancelPending=false){
   if(cancelPending){if(kind==='movie')movieSeq++;else actorSeq++}
 }
 function showDrop(el,items,kind){
-  if(roundActionBusy||roundSyncRequired||pendingFinish!==null)return;
+  if(roundFinished||roundActionBusy||roundSyncRequired||pendingFinish!==null)return;
   closeDrop(kind);if(!items.length)return;
   const choices=items.slice(0,12);dropState[kind].items=choices;
   el.innerHTML=choices.map((x,i)=>'<div class="opt" id="'+kind+'Drop-option-'+i+'" role="option" aria-selected="false"><img alt="" src="'+img(kind==='movie'?x.poster_path:x.profile_path)+'"><div><b>'+esc(kind==='movie'?x.title:x.name)+'</b><small>'+(kind==='movie'?esc((x.release_date||'').slice(0,4)):esc(x.character||''))+'</small></div></div>').join('');
@@ -245,7 +245,7 @@ function showDrop(el,items,kind){
   [...el.children].forEach((node,i)=>node.onclick=()=>kind==='movie'?chooseMovie(choices[i]):chooseActor(choices[i]));
 }
 function dropKey(kind,event){
-  if(event.isComposing||roundActionBusy||roundSyncRequired||pendingFinish!==null)return;
+  if(event.isComposing||roundFinished||roundActionBusy||roundSyncRequired||pendingFinish!==null)return;
   if(event.key==='Escape'){event.preventDefault();closeDrop(kind,true);return}
   const state=dropState[kind];if(!state.items.length)return;
   if(event.key==='ArrowDown'||event.key==='ArrowUp'){
@@ -267,7 +267,7 @@ qs('movieInput').oninput=async()=>{
   catch(e){if(seq===movieSeq){closeDrop('movie');msg('Movie search unavailable: '+e.message,'bad')}}
 };
 async function chooseMovie(movie){
-  if(roundActionBusy||roundSyncRequired||pendingFinish!==null)return;
+  if(roundFinished||roundActionBusy||roundSyncRequired||pendingFinish!==null)return;
   closeDrop('movie',true);closeDrop('actor',true);selectedMovie=movie;selectedActor=null;
   qs('movieInput').value=movie.title;qs('actorInput').disabled=false;qs('actorInput').value='';qs('actorInput').focus();
 }
@@ -278,7 +278,7 @@ qs('actorInput').oninput=async()=>{
   catch(e){if(seq===actorSeq){closeDrop('actor');msg('Actor search unavailable: '+e.message,'bad')}}
 };
 function chooseActor(actor){
-  if(roundActionBusy||roundSyncRequired||pendingFinish!==null)return;
+  if(roundFinished||roundActionBusy||roundSyncRequired||pendingFinish!==null)return;
   closeDrop('actor',true);selectedActor=actor;qs('actorInput').value=actor.name;qs('connect').focus();
 }
 qs('connect').onclick=async()=>{
@@ -326,7 +326,7 @@ async function finishRound(solved,gaveUp=false,recoveredResult=null){
   let rd;
   try{rd=recoveredResult||await get('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})})}
   catch(e){qs('retryResult').classList.remove('hidden');throw Error(e.message+' Your result is pending. Select Retry result.')}
-  pendingFinish=null;qs('retryResult').classList.add('hidden');
+  pendingFinish=null;roundFinished=true;for(const id of ['connect','back','hint1','hint2','giveUp','retrySync','retryResult','movieInput','actorInput'])qs(id).disabled=true;qs('retryResult').classList.add('hidden');
   resultShareText=shareSummary(rd);
   qs('shareStatus').textContent='';qs('shareFallback').classList.add('hidden');
   rememberRound(null);
@@ -338,10 +338,10 @@ async function finishRound(solved,gaveUp=false,recoveredResult=null){
     let quick=rd.quick_cut_bonus??Math.max(0,(rd.cut-rd.degrees)*25);
     let deep=(rd.deep_cut_details||[]).filter(x=>x.bonus>0).map(x=>'<div class="deep-row">'+(x.from_actor?esc(x.from_actor)+' → ':'')+esc(x.movie)+' → '+esc(x.actor)+' <b class="gold">+'+x.bonus+'</b></div>').join('')||'<div class="deep-row">No Deep Cut bonus this round.</div>';
     qs('resultTitle').textContent=cutText;
-    qs('resultText').innerHTML='<div class="result-grid"><div class="result-stat"><b>'+rd.degrees+'</b><span>Your route</span></div><div class="result-stat"><b>'+rd.cut+'</b><span>The Cut</span></div><div class="result-stat"><b>'+rd.points+'</b><span>Score</span></div><div class="result-stat"><b>'+esc(fmt(Math.round(rd.elapsed_seconds||seconds)))+'</b><span>Time</span></div></div><div class="eyebrow gold">Quick Cut +'+quick+'</div><div class="deep-row">'+(quick>0?'Efficiency bonus for finishing '+(rd.cut-rd.degrees)+' under The Cut.':'No Quick Cut bonus this round.')+'</div><div class="eyebrow gold" style="margin-top:14px">Deep Cuts +'+(rd.deep_cut_bonus||0)+'</div>'+deep+'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+(comparison?' → '+esc(comparison):'')+'</div><div style="margin-top:10px;color:var(--muted)">Hints: '+rd.hints_used+' (−'+rd.hint_penalty+') • Backtracks: '+rd.backtracks_used+' / '+rd.free_backs+' free (−'+rd.backtrack_penalty+')</div></div>';
+    qs('resultText').innerHTML='<div class="result-grid"><div class="result-stat"><b>'+rd.degrees+'</b><span>Your route</span></div><div class="result-stat"><b>'+rd.cut+'</b><span>The Cut</span></div><div class="result-stat"><b>'+rd.points+'</b><span>Score</span></div><div class="result-stat"><b>'+esc(fmt(Math.round(rd.elapsed_seconds??seconds)))+'</b><span>Time</span></div></div><div class="eyebrow gold">Quick Cut +'+quick+'</div><div class="deep-row">'+(quick>0?'Efficiency bonus for finishing '+(rd.cut-rd.degrees)+' under The Cut.':'No Quick Cut bonus this round.')+'</div><div class="eyebrow gold" style="margin-top:14px">Deep Cuts +'+(rd.deep_cut_bonus||0)+'</div>'+deep+'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+(comparison?' → '+esc(comparison):'')+'</div><div style="margin-top:10px;color:var(--muted)">Hints: '+rd.hints_used+' (−'+rd.hint_penalty+') • Backtracks: '+rd.backtracks_used+' / '+rd.free_backs+' free (−'+rd.backtrack_penalty+')</div></div>';
     if(rd.scoring_note){const note=document.createElement('p');note.textContent=rd.scoring_note;qs('resultText').appendChild(note)}
   }else{
-    qs('resultTitle').textContent=gaveUp?'Round ended':'Over the Cut';
+    qs('resultTitle').textContent=gaveUp?'Round ended':'Six-connection limit reached';
     qs('resultText').innerHTML='<p>Target not reached.</p>'+(comparison?'<div class="comparison"><div class="eyebrow">'+esc(rd.comparison_label||'Verified comparison route')+' — '+rd.comparison_degrees+' degree'+(rd.comparison_degrees===1?'':'s')+'</div><div style="margin-top:8px">'+esc(start.name)+' → '+esc(comparison)+'</div></div>':'');
   }
   if(rd.challenge_outcome){
@@ -350,7 +350,7 @@ async function finishRound(solved,gaveUp=false,recoveredResult=null){
     const note=document.createElement('p');note.textContent=label+(c.opponent_solved?' Their score: '+c.opponent_points+'.':' Your friend did not reach the target.');
     qs('resultText').appendChild(note);
   }
-  qs('result').scrollIntoView({behavior:'smooth',block:'start'});
+  qs('resultTitle').focus({preventScroll:true});qs('result').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function applyHintMode(enabled){
   for(const id of ['hint1','hint2']){qs(id).disabled=!enabled;qs(id).classList.toggle('hidden',!enabled)}
@@ -373,11 +373,12 @@ async function begin(level){
     qs('levelClapper').classList.add('clap-once');
     if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches)await new Promise(resolve=>setTimeout(resolve,240));
     difficulty=puzzle.difficulty||level;challengeBenchmark=puzzle.challenge_benchmark||null;
-    routeRevision=puzzle.route_revision??0;roundSyncRequired=false;qs('retrySync').classList.add('hidden');puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;route=[{actor:current,movie:null}];
+    roundFinished=false;routeRevision=puzzle.route_revision??0;roundSyncRequired=false;qs('retrySync').classList.add('hidden');puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;route=[{actor:current,movie:null}];
+    for(const id of ['connect','back','giveUp'])qs(id).disabled=false;qs('movieInput').disabled=false;
     rememberRound(puzzleId);
     qs('startName').textContent=start.name;qs('targetName').textContent=target.name;setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);applyHintMode(puzzle.hints_enabled!==false);
     qs('challengeInvite').classList.add('hidden');
-    qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();if(challengeBenchmark)msg(challengeBenchmark.solved?'Score to beat: '+challengeBenchmark.points+'. Same actors, difficulty and hint mode.':'Your friend did not reach the target. Finish this puzzle to win.');timer=setInterval(()=>{seconds++;stats()},1000);
+    qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();qs('movieInput').focus();if(challengeBenchmark)msg(challengeBenchmark.solved?'Score to beat: '+challengeBenchmark.points+'. Same actors, difficulty and hint mode.':'Your friend did not reach the target. Finish this puzzle to win.');timer=setInterval(()=>{seconds++;stats()},1000);
   }catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}
   finally{startingRound=false;qs('backToRules').disabled=false;qs('levelClapper').classList.add('hidden');qs('loading').setAttribute('aria-busy','false')}
 }
@@ -387,7 +388,7 @@ document.querySelectorAll('.difficulty').forEach(b=>b.onclick=()=>begin(b.datase
 qs('giveUp').onclick=async()=>{if(confirm('Give up this round?')){try{await finishRound(false,true)}catch(e){msg(e.message,'bad')}}};
 stats();
 async function applyRoundSnapshot(d){
-    routeRevision=d.route_revision??0;puzzleId=d.puzzle_id;start=d.start;target=d.target;current=d.current_actor;difficulty=d.difficulty;
+    roundFinished=false;routeRevision=d.route_revision??0;puzzleId=d.puzzle_id;start=d.start;target=d.target;current=d.current_actor;difficulty=d.difficulty;
     challengeBenchmark=d.challenge_benchmark||null;
     degree=d.degrees;hints=d.hints_used;freeBacks=d.free_backs;seconds=Math.floor(d.elapsed_seconds);
     route=[{actor:start,movie:null},...(d.live_route||[])];
@@ -467,6 +468,20 @@ async function loadChallenge(token){
     }
   }catch(e){qs('challengeTitle').textContent='Challenge unavailable';qs('challengeDetails').textContent=e.message}
 }
+qs('newGame').onclick=()=>{
+  if(!roundFinished||pendingFinish)return;
+  clearInterval(timer);rememberRound(null);
+  activeChallengeToken=null;challengeBenchmark=null;roundFinished=false;roundSyncRequired=false;
+  puzzleId=null;routeRevision=0;degree=0;hints=0;seconds=0;freeBacks=1;route=[];selectedMovie=selectedActor=null;
+  resultShareText='';closeDrop('movie',true);closeDrop('actor',true);
+  qs('noHints').disabled=false;qs('shareFallback').classList.add('hidden');qs('shareStatus').textContent='';
+  const url=new URL(location.href);url.searchParams.delete('challenge');history.replaceState(null,'',url.pathname+url.search+url.hash);
+  for(const id of ['result','gameShell','landing','challengeInvite','retryResult','retrySync'])qs(id).classList.add('hidden');
+  qs('workspace').classList.remove('hidden');qs('loading').classList.remove('hidden');
+  qs('loadTitle').textContent='Choose your level';qs('loadText').textContent='Start a new round against the weekly featured actor.';
+  document.querySelectorAll('.difficulty').forEach(button=>button.disabled=false);
+  qs('backToRules').disabled=false;qs('loadTitle').focus({preventScroll:true});window.scrollTo({top:0,behavior:'smooth'});
+};
 qs('normalGame').onclick=()=>{activeChallengeToken=null;qs('noHints').disabled=false;history.replaceState(null,'',location.pathname);qs('challengeInvite').classList.add('hidden');qs('landing').classList.remove('hidden')};
 qs('retrySync').onclick=async()=>{await recoverAction(Error('Recovering your round'))};
 qs('retryResult').onclick=async()=>{if(!pendingFinish)return;try{await finishRound(pendingFinish.solved,pendingFinish.gaveUp)}catch(e){msg(e.message,'bad')}};
@@ -474,8 +489,8 @@ let roundActionBusy=false;
 for(const id of ['connect','back','hint1','hint2','giveUp','retryResult','retrySync']){
   const button=qs(id),action=button.onclick;
   button.onclick=async(...args)=>{
-    if(roundActionBusy||(roundSyncRequired&&id!=='retrySync')||(pendingFinish!==null&&id!=='retryResult'))return;
-    roundActionBusy=true;movieSeq++;actorSeq++;
+    if(roundFinished||roundActionBusy||(roundSyncRequired&&id!=='retrySync')||(pendingFinish!==null&&id!=='retryResult'))return;
+    const previousRevision=routeRevision;roundActionBusy=true;movieSeq++;actorSeq++;
     closeDrop('movie');closeDrop('actor');
     const controls=['connect','back','hint1','hint2','giveUp','retryResult','retrySync'];
     for(const key of controls)qs(key).disabled=true;
@@ -483,8 +498,9 @@ for(const id of ['connect','back','hint1','hint2','giveUp','retryResult','retryS
     try{return await action(...args)}
     finally{
       roundActionBusy=false;
-      for(const key of controls)qs(key).disabled=(pendingFinish!==null&&key!=='retryResult')||(roundSyncRequired&&key!=='retrySync')||((key==='hint1'||key==='hint2')&&qs(key).classList.contains('hidden'));
-      qs('movieInput').disabled=pendingFinish!==null||roundSyncRequired;qs('actorInput').disabled=pendingFinish!==null||roundSyncRequired||!selectedMovie;
+      for(const key of controls)qs(key).disabled=roundFinished||(pendingFinish!==null&&key!=='retryResult')||(roundSyncRequired&&key!=='retrySync')||((key==='hint1'||key==='hint2')&&qs(key).classList.contains('hidden'));
+      qs('movieInput').disabled=roundFinished||pendingFinish!==null||roundSyncRequired;qs('actorInput').disabled=roundFinished||pendingFinish!==null||roundSyncRequired||!selectedMovie;
+      if(!roundFinished&&!pendingFinish&&!roundSyncRequired&&routeRevision!==previousRevision)qs('movieInput').focus();
     }
   };
 }

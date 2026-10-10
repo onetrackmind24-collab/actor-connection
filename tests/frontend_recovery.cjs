@@ -18,14 +18,15 @@ function fixture() {
         contains(value) { return this.values.has(value); },
         toggle(value, on) { on ? this.add(value) : this.remove(value); },
       },
-      attrs: {}, focus() {}, scrollIntoView() {}, appendChild() {},
+      attrs: {}, focus() {this.focused=true;}, scrollIntoView() {}, appendChild() {},
       setAttribute(name,value) {this.attrs[name]=value;}, removeAttribute(name) {delete this.attrs[name];},
     };
   }
   const context = {
     document: {getElementById: id => nodes[id], querySelectorAll: () => []},
     AbortController, setTimeout, clearTimeout,
-    URLSearchParams, location: {search: ''},
+    URL, URLSearchParams, location: {search: '',href:'https://actor-connection.onrender.com/?keep=yes#game'},
+    history: {replaceState(state,title,url) {context.updatedUrl=url;}}, window: {scrollTo(){}},
     sessionStorage: {getItem: () => null, removeItem() { context.savedRoundCleared = true; }},
     clearedTimers: 0,
     clearInterval() { context.clearedTimers++; }, setInterval() { return 1; },
@@ -220,7 +221,47 @@ async function run() {
     assert.equal(vm.runInContext('selectedActor',f.context),null);
     assert.equal(f.nodes.actorDrop.classList.contains('hidden'),true);
   }
-  console.log('PASS recovery, deadlines, search feedback, keyboard selection and stale suggestions');
+  // Completed rounds lock controls and New Game leaves challenge mode without reload.
+  {
+    const f=fixture();f.context.location.href='https://actor-connection.onrender.com/?challenge=old&keep=yes#game';
+    vm.runInContext("seconds=123;activeChallengeToken='old';challengeBenchmark={points:20}",f.context);
+    const result={solved:true,degrees:1,cut:3,points:100,hints_used:0,hint_penalty:0,backtracks_used:0,free_backs:1,backtrack_penalty:0,elapsed_seconds:0,comparison_route:[],comparison_degrees:1,challenge_token:'new'};
+    await f.context.finishRound(true,false,result);
+    assert.equal(vm.runInContext('roundFinished',f.context),true);
+    assert.equal(f.nodes.resultTitle.focused,true);
+    assert.match(f.nodes.resultText.innerHTML,/00:00/);
+    assert.equal(f.nodes.connect.disabled,true);
+    let requests=0;f.context.fetch=async()=>{requests++;throw Error('finished action should not run')};
+    await f.nodes.back.onclick();assert.equal(requests,0);
+    f.nodes.noHints.disabled=true;f.nodes.newGame.onclick();
+    assert.equal(vm.runInContext('activeChallengeToken',f.context),null);
+    assert.equal(vm.runInContext('challengeBenchmark',f.context),null);
+    assert.equal(vm.runInContext('puzzleId',f.context),null);
+    assert.equal(f.context.updatedUrl,'/?keep=yes#game');
+    assert.equal(f.nodes.loading.classList.contains('hidden'),false);
+    assert.equal(f.nodes.result.classList.contains('hidden'),true);
+    assert.equal(f.nodes.noHints.disabled,false);
+    assert.equal(f.nodes.loadTitle.focused,true);
+    f.context.performance={now:()=>0};f.context.window.matchMedia=()=>({matches:true});
+    f.context.setTimeout=(callback,ms)=>ms>=30000?setTimeout(callback,ms):setImmediate(callback);
+    f.context.sessionStorage.setItem=()=>{};
+    f.context.fetch=async url=>{
+      if(url==='/api/status')return response({ready:true});
+      assert(url.startsWith('/api/puzzle?difficulty=beginner&hints='));
+      assert(!url.includes('challenge='));
+      return response({puzzle_id:'fresh',difficulty:'beginner',verified:true,start:{id:5,name:'Fresh'},target:{id:9,name:'Target'},hints_enabled:true});
+    };
+    await f.context.begin('beginner');
+    assert.equal(vm.runInContext('puzzleId',f.context),'fresh');
+    assert.equal(vm.runInContext('roundFinished',f.context),false);
+    assert.equal(f.nodes.connect.disabled,false);
+    assert.equal(f.nodes.back.disabled,false);
+    assert.equal(f.nodes.movieInput.disabled,false);
+    assert.equal(f.nodes.movieInput.focused,true);
+    await f.context.finishRound(false,false,{...result,solved:false,degrees:6});
+    assert.equal(f.nodes.resultTitle.textContent,'Six-connection limit reached');
+  }
+  console.log('PASS recovery, search/keyboard, completed-round locks and fresh-game replay');
 }
 
 run().catch(error => {console.error(error); process.exitCode = 1;});
