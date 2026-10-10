@@ -33,6 +33,11 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
 .level-clapper.clap-once .clapper-arm{animation:level-clap .24s cubic-bezier(.7,0,1,1) forwards}
 @keyframes level-clap{from{transform:rotate(-22deg)}to{transform:rotate(0deg)}}
 @media(prefers-reduced-motion:reduce){.clapper-arm{animation:none}}
+.weekly-feature{padding:12px 14px;border:1px solid #514328;border-radius:12px;background:#211b10;color:var(--gold2);line-height:1.5}
+.actor-copy,.field,.opt>div{min-width:0}.actor-copy h2,.opt b,.current-line strong,.comparison,.route{overflow-wrap:anywhere}
+.opt img{flex-shrink:0}.field input{font-size:16px}
+button:focus-visible{outline:3px solid var(--gold2);outline-offset:3px}
+@media(max-width:600px){.app{padding-bottom:calc(28px + env(safe-area-inset-bottom))}.btn,.difficulty{min-height:44px}}
 </style>
 </head>
 <body>
@@ -51,6 +56,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
   <section class="panel landing" id="landing">
     <div class="eyebrow gold">How to play</div>
     <h2>Connect the start actor to the target.</h2>
+    <p id="weeklyFeature" class="weekly-feature hidden" aria-live="polite"></p>
     <p class="landing-intro">Build a chain of movie connections in six degrees or fewer. Every connection must use a movie both actors actually appeared in.</p>
 
     <div class="rule-grid">
@@ -86,6 +92,7 @@ button,input{font:inherit}.app{width:min(1180px,100%);margin:auto;padding:22px 1
     </div>
     <h2 id="loadTitle" tabindex="-1">Choose your level</h2>
     <p id="loadText">The puzzle is verified before play begins.</p>
+    <p id="weeklyLevel" class="weekly-feature hidden" aria-live="polite"></p>
     <label style="display:block;margin:16px 0"><input type="checkbox" id="noHints"> Play without hints</label>
     <div class="difficulty-grid">
       <button class="difficulty" data-difficulty="beginner"><strong>Beginner</strong><small>Familiar actors and easier routes</small></button>
@@ -175,6 +182,7 @@ function img(p){
 function setActorImage(id,path){
   const el=qs(id);
   if(!el)return;
+  el.onerror=()=>{el.onerror=null;el.src=placeholder()};
   try{el.src=img(path)}catch(_){try{el.src=placeholder()}catch(__){}}
 }
 async function get(url,options={}){
@@ -204,9 +212,23 @@ function hintError(error){
 }
 async function movieSearch(q){return get('/api/autocomplete/movies?puzzle_id='+encodeURIComponent(puzzleId)+'&q='+encodeURIComponent(q))}
 async function actorSearch(mid,q){return get('/api/autocomplete/actors?puzzle_id='+encodeURIComponent(puzzleId)+'&movie_id='+encodeURIComponent(mid)+'&q='+encodeURIComponent(q))}
+let weeklyRequest=0;
+async function refreshWeeklyFeature(){
+  const request=++weeklyRequest;
+  try{
+    const status=await get('/api/status'),schedule=status.weekly_schedule;
+    if(request!==weeklyRequest||!schedule?.name)return;
+    let text='This week’s target: '+schedule.name+'.';
+    if(schedule.rotation_enabled&&schedule.next_name&&schedule.changes_at){
+      const date=new Date(schedule.changes_at);
+      if(!Number.isNaN(date.getTime()))text+=' Next: '+schedule.next_name+' — '+new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',timeZone:'America/New_York'}).format(date)+' at midnight New York time.';
+    }
+    for(const id of ['weeklyFeature','weeklyLevel']){qs(id).textContent=text;qs(id).classList.remove('hidden')}
+  }catch(_){/* Schedule availability must never block starting or recovering a round. */}
+}
 function fmt(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
 function stats(){qs('degrees').textContent=degree+' / 6';qs('hints').textContent=hints;qs('backs').textContent=freeBacks;qs('time').textContent=fmt(seconds);qs('routeCount').textContent=degree+' connection'+(degree===1?'':'s')}
-function msg(t,c='hint'){qs('message').innerHTML='<div class="msg '+c+'">'+esc(t)+'</div>'}
+function msg(t,c='hint'){if(!t){qs('message').innerHTML='';return}qs('message').innerHTML='<div class="msg '+c+'">'+esc(t)+'</div>'}
 function renderRoute(){
   if(!route.length){qs('route').innerHTML='';return}
   let html='<span class="node">'+esc(route[0].actor.name)+'</span>';
@@ -382,7 +404,7 @@ async function begin(level){
   }catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}
   finally{startingRound=false;qs('backToRules').disabled=false;qs('levelClapper').classList.add('hidden');qs('loading').setAttribute('aria-busy','false')}
 }
-qs('showDifficulty').onclick=()=>{qs('landing').classList.add('hidden');qs('loading').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
+qs('showDifficulty').onclick=()=>{refreshWeeklyFeature();qs('landing').classList.add('hidden');qs('loading').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
 qs('backToRules').onclick=()=>{qs('loading').classList.add('hidden');qs('landing').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
 document.querySelectorAll('.difficulty').forEach(b=>b.onclick=()=>begin(b.dataset.difficulty));
 qs('giveUp').onclick=async()=>{if(confirm('Give up this round?')){try{await finishRound(false,true)}catch(e){msg(e.message,'bad')}}};
@@ -504,6 +526,7 @@ for(const id of ['connect','back','hint1','hint2','giveUp','retryResult','retryS
     }
   };
 }
+refreshWeeklyFeature();
 const inviteToken=new URLSearchParams(location.search).get('challenge');
 const savedRound=rememberedRound();if(inviteToken)loadChallenge(inviteToken);else if(savedRound)resumeRound(savedRound);
 </script>

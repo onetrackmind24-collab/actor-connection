@@ -356,6 +356,7 @@ class GameplayTests(unittest.TestCase):
             self.assertEqual(schedule['name'],game.WEEKLY_TARGETS[week%9])
             self.assertEqual(before['name'],game.WEEKLY_TARGETS[(week-1)%9])
             self.assertTrue(schedule['rotation_enabled'])
+            self.assertEqual(schedule['next_name'],game.WEEKLY_TARGETS[(week+1)%9])
             for level in ('beginner','intermediate','expert'):
                 with patch.object(game,'weekly_target',return_value=schedule):
                     generated=game.generate_puzzle(level)

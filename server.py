@@ -30,7 +30,8 @@ def weekly_target(now=None):
     end=datetime.datetime.combine(monday+datetime.timedelta(days=7),datetime.time(),tzinfo=WEEKLY_ZONE)
     return {'name':TARGET_OVERRIDE or WEEKLY_TARGETS[index%len(WEEKLY_TARGETS)],
             'week_start':monday.isoformat(),'changes_at':None if TARGET_OVERRIDE else end.isoformat(),
-            'rotation_enabled':not bool(TARGET_OVERRIDE)}
+            'rotation_enabled':not bool(TARGET_OVERRIDE),
+            'next_name':None if TARGET_OVERRIDE else WEEKLY_TARGETS[(index+1)%len(WEEKLY_TARGETS)]}
 # Demo fallback pool. Live mode discovers a much larger candidate catalog from the provider.
 # A candidate is NEVER served until the route verifier proves a <=6 route.
 PUZZLE_CANDIDATES={
@@ -1158,7 +1159,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-live-rotation-verification-v30','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-weekly-schedule-ui-v31','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)

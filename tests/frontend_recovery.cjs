@@ -49,6 +49,23 @@ function snapshot(degrees, revision, backs = 0) {
 const response = data => ({ok: true, status: 200, json: async () => data});
 
 async function run() {
+  const weekly=fixture();
+  weekly.context.fetch=async()=>response({weekly_schedule:{name:'Matt Damon',rotation_enabled:true,
+    next_name:'Tom Hanks',changes_at:'2026-10-12T00:00:00-04:00'}});
+  await weekly.context.refreshWeeklyFeature();
+  assert.match(weekly.nodes.weeklyFeature.textContent,/Matt Damon/);
+  assert.match(weekly.nodes.weeklyLevel.textContent,/Tom Hanks — Oct 12 at midnight New York time/);
+  let release;
+  weekly.context.fetch=()=>new Promise(resolve=>release=resolve);
+  const stale=weekly.context.refreshWeeklyFeature();
+  weekly.context.fetch=async()=>response({weekly_schedule:{name:'Tom Hanks',rotation_enabled:false}});
+  await weekly.context.refreshWeeklyFeature();
+  release(response({weekly_schedule:{name:'Matt Damon',rotation_enabled:true,next_name:'Tom Hanks',changes_at:'2026-10-12T00:00:00-04:00'}}));
+  await stale;
+  assert.equal(weekly.nodes.weeklyFeature.textContent,'This week’s target: Tom Hanks.');
+  weekly.context.fetch=async()=>{throw Error('offline')};
+  await weekly.context.refreshWeeklyFeature();
+  assert.equal(weekly.nodes.weeklyFeature.textContent,'This week’s target: Tom Hanks.');
   const {nodes, context} = fixture();
   let moveRequests = 0;
   context.fetch = async (url, options) => {
