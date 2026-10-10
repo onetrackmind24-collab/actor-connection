@@ -140,7 +140,7 @@ def start_challenge(token):
     pid=secrets.token_urlsafe(12)
     puzzle={k:item[k] for k in ('start','target','difficulty','comparison_route','cut','cut_meta','route_status','route_search','hints_enabled')}
     puzzle.update({'scoring_version':item.get('scoring_version',1),'created':time.time(),'live_route':[],'current_actor':puzzle['start'],
-                   'hints_used':0,'backtracks_used':0,'finished':False,
+                   'hints_used':0,'hinted_movie_ids':[],'backtracks_used':0,'finished':False,
                    'challenge_token':token,'challenge_benchmark':item['benchmark']})
     PUZZLES[pid]=puzzle;save_active_puzzles()
     return {'puzzle_id':pid,'verified':True,**{k:puzzle[k] for k in ('start','target','difficulty','hints_enabled','challenge_token','challenge_benchmark')}}
@@ -586,15 +586,24 @@ def connection_deep_cut(movie, movie_cast, current_id, next_id):
     if difficulty >= 2: return 5
     return 0
 
-def deep_cut_for_route(start_id, verified):
+def hinted_movies_for_round(puzzle):
+    if 'hinted_movie_ids' in puzzle: return puzzle['hinted_movie_ids']
+    # Older active rounds did not retain disclosure history. Do not award
+    # unverifiable hint-assisted bonuses; cached finished results stay unchanged.
+    if puzzle.get('hints_used',0):
+        return [step['movie']['id'] for step in puzzle.get('live_route',[])]
+    return []
+
+def deep_cut_for_route(start_id, verified, hinted_movie_ids=None):
+    hinted={str(mid) for mid in (hinted_movie_ids or [])}
     cur=str(start_id); details=[]; total=0
     for step in verified:
         mid=str(step['movie']['id']); nxt=str(step['actor']['id'])
         movie=next((m for m in movies(cur) if str(m.get('id'))==mid), step['movie'])
         movie_cast=eligible_cast(mid)
-        bonus=connection_deep_cut(movie,movie_cast,cur,nxt)
+        bonus=0 if mid in hinted else connection_deep_cut(movie,movie_cast,cur,nxt)
         from_name=next((a.get('name','') for a in movie_cast if str(a.get('id'))==cur),'')
-        details.append({'movie':step['movie']['title'],'from_actor':from_name,'actor':step['actor']['name'],'bonus':bonus})
+        details.append({'movie':step['movie']['title'],'from_actor':from_name,'actor':step['actor']['name'],'bonus':bonus,'hinted_movie':mid in hinted})
         total += bonus; cur=nxt
     return min(25,total), details
 
@@ -935,7 +944,7 @@ def _generate_puzzle(difficulty='expert', hints_enabled=True, *, target_name=Non
             'created':time.time(),'difficulty':difficulty,'hints_enabled':bool(hints_enabled),
             'start':public_person(candidate),'target':public_person(target),
             'comparison_route':route,'route_status':'verified_route','route_search':route_meta,
-            'cut':cut,'cut_meta':cut_meta,'hints_used':0,'backtracks_used':0,
+            'cut':cut,'cut_meta':cut_meta,'hints_used':0,'hinted_movie_ids':[],'backtracks_used':0,
             'live_route':[], 'current_actor':public_person(candidate), 'finished':False
         }
         save_active_puzzles()
@@ -981,7 +990,7 @@ def _generate_puzzle(difficulty='expert', hints_enabled=True, *, target_name=Non
                 'created':time.time(),'difficulty':difficulty,'hints_enabled':bool(hints_enabled),
                 'start':public_person(candidate),'target':public_person(target),
                 'comparison_route':route,'route_status':route_status,'route_search':route_meta,
-                'cut':cut,'cut_meta':cut_meta,'hints_used':0,'backtracks_used':0,
+                'cut':cut,'cut_meta':cut_meta,'hints_used':0,'hinted_movie_ids':[],'backtracks_used':0,
                 'live_route':[], 'current_actor':public_person(candidate), 'finished':False
             }
             save_active_puzzles()
@@ -1129,7 +1138,7 @@ def route_revision_error(puzzle,body):
 def resumable_round(puzzle_id, puzzle):
     """Expose only player-owned progress; keep comparison answers and The Cut hidden."""
     played=list(puzzle.get('live_route') or [])
-    deep,_=deep_cut_for_route(puzzle['start']['id'],played)
+    deep,_=deep_cut_for_route(puzzle['start']['id'],played,hinted_movies_for_round(puzzle))
     return {'puzzle_id':puzzle_id,'verified':True,'difficulty':puzzle['difficulty'],'hints_enabled':puzzle.get('hints_enabled',True),
             'start':puzzle['start'],'target':puzzle['target'],
             'current_actor':puzzle['current_actor'],'live_route':played,
@@ -1159,7 +1168,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-weekly-schedule-ui-v31','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-10-hinted-movie-scoring-v32','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'weekly_target':weekly_target()['name'],'weekly_schedule':weekly_target(),'rotation_verification':rotation_audit_status(),'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1273,9 +1282,13 @@ class Handler(SimpleHTTPRequestHandler):
                 first=path[0]
                 # Hint usage is server-authoritative. A client cannot erase a hint penalty
                 # by submitting hints=0 at the end of the round.
-                puzzle['hints_used']=max(int(puzzle.get('hints_used',0)), level)
+                disclosed=set(str(mid) for mid in hinted_movies_for_round(puzzle))
+                disclosed.add(str(first['movie']['id']))
+                proposed=dict(puzzle,hints_used=max(int(puzzle.get('hints_used',0)),level),hinted_movie_ids=sorted(disclosed))
+                earned_deep,_=deep_cut_for_route(proposed['start']['id'],proposed.get('live_route',[]),proposed['hinted_movie_ids'])
+                puzzle.update(proposed)
                 save_active_puzzles()
-                out={'level':level,'movie':first['movie']}
+                out={'level':level,'movie':first['movie'],'free_backs':1+earned_deep//10,'deep_cut_bank':earned_deep}
                 if level>=2: out['actor']=first['actor']
                 return self.send_json(out)
             if u.path not in PUBLIC_FILES:
@@ -1338,7 +1351,7 @@ class Handler(SimpleHTTPRequestHandler):
                 elif not solved and remaining==0:
                     viability='dead_end'
                 proposed['viability']=viability
-                earned_deep,_=deep_cut_for_route(puzzle['start']['id'],proposed['live_route'])
+                earned_deep,_=deep_cut_for_route(puzzle['start']['id'],proposed['live_route'],hinted_movies_for_round(proposed))
                 free_backs=1+(earned_deep//10)
                 puzzle.update(proposed)
                 save_active_puzzles()
@@ -1356,7 +1369,7 @@ class Handler(SimpleHTTPRequestHandler):
                 proposed['hint_routes']={}
                 # One back is always free. Every 10 Deep Cut points earned on the CURRENT
                 # surviving route earns another free back. Rolled-back Deep Cuts no longer count.
-                earned_deep,_=deep_cut_for_route(proposed['start']['id'],proposed['live_route'])
+                earned_deep,_=deep_cut_for_route(proposed['start']['id'],proposed['live_route'],hinted_movies_for_round(proposed))
                 free_backs=1+(earned_deep//10)
                 penalty=max(0,int(proposed['backtracks_used'])-free_backs)*5
                 puzzle.update(proposed)
@@ -1379,7 +1392,7 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json({'error':'Round is still active'},409)
                 comparison=puzzle['comparison_route']
                 proven=puzzle.get('route_status')=='proven_shortest'
-                deep_bonus, deep_details = deep_cut_for_route(puzzle['start']['id'],verified) if solved else (0,[])
+                deep_bonus, deep_details = deep_cut_for_route(puzzle['start']['id'],verified,hinted_movies_for_round(puzzle)) if solved else (0,[])
                 hints_used=min(2,max(0,int(puzzle.get('hints_used',0) or 0)))
                 hint_penalty=0 if hints_used==0 else (10 if hints_used==1 else 20)
                 quick_cut_bonus=max(0,(int(puzzle.get('cut',3))-len(verified))*25) if solved else 0

@@ -319,6 +319,39 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(self.round['hints_used'],1)
         self.assertNotIn(actor,self.round['hint_routes'])
 
+    def test_hinted_movie_never_earns_deep_points_or_bonus_backs(self):
+        game=self.game
+        with patch.object(game,'connection_deep_cut',return_value=15):
+            status,h=self.request('/api/hint?'+urllib.parse.urlencode({'puzzle_id':self.pid,'level':1,'route_revision':0}))
+            self.assertEqual(status,200)
+            first=self.round['comparison_route'][0]
+            self.assertEqual(h['movie']['id'],first['movie']['id'])
+            self.assertEqual(self.round['hinted_movie_ids'],[str(first['movie']['id'])])
+            self.assertEqual(self.move()[1]['free_backs'],1)
+            status,restored=self.request('/api/round?puzzle_id='+self.pid)
+            self.assertEqual(restored['free_backs'],1)
+            loaded=game.load_active_puzzles()[self.pid]
+            self.assertEqual(loaded['hinted_movie_ids'],self.round['hinted_movie_ids'])
+            self.assertEqual(self.request('/api/backtrack',{'route_revision':1})[0],200)
+            self.assertEqual(self.move()[1]['free_backs'],1)
+            current=self.round['start']['id']
+            points,details=game.deep_cut_for_route(current,self.round['comparison_route'],self.round['hinted_movie_ids'])
+            self.assertEqual(details[0]['bonus'],0)
+            self.assertTrue(details[0]['hinted_movie'])
+            self.assertTrue(all(x['bonus']==15 for x in details[1:] if x['movie']!=first['movie']['title']))
+            for step in self.round['comparison_route'][1:]:
+                status,move=self.request('/api/move',{'route_revision':self.round['route_revision'],
+                    'movie_id':step['movie']['id'],'next_actor_id':step['actor']['id']})
+                self.assertEqual(status,200)
+            status,result=self.request('/api/result',{})
+            self.assertEqual(status,200)
+            self.assertTrue(result['solved'])
+            self.assertEqual(result['deep_cut_details'][0]['bonus'],0)
+            self.assertEqual(result['deep_cut_bonus'],points)
+            self.assertEqual(self.request('/api/result',{})[1],result)
+            challenge=game.start_challenge(result['challenge_token'])
+            self.assertEqual(game.PUZZLES[challenge['puzzle_id']]['hinted_movie_ids'],[])
+
     def test_rotation_audit_uses_all_targets_without_changing_game_state(self):
         game=self.game
         before=copy.deepcopy(game.PUZZLES)
