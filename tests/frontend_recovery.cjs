@@ -49,6 +49,14 @@ function snapshot(degrees, revision, backs = 0) {
 const response = data => ({ok: true, status: 200, json: async () => data});
 
 async function run() {
+  // One callback after a suspended tab must catch up rather than add one second.
+  const clock=fixture();let now=10000,tick;
+  clock.context.Date={now:()=>now};clock.context.setInterval=callback=>{tick=callback;return 1};
+  clock.context.startRoundTimer(12.5);
+  assert.equal(clock.nodes.time.textContent,'00:12');
+  now+=90000;tick();assert.equal(clock.nodes.time.textContent,'01:42');
+  clock.context.startRoundTimer(3);now+=2000;tick();
+  assert.equal(clock.nodes.time.textContent,'00:05');
   // A failed challenge start must not leak its actor pair into a regular round.
   const failedStart=fixture();
   failedStart.context.location.href='https://actor-connection.onrender.com/?challenge=invitation&keep=yes#game';

@@ -243,6 +243,12 @@ async function refreshWeeklyFeature(){
   }catch(_){/* Schedule availability must never block starting or recovering a round. */}
 }
 function fmt(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')}
+function startRoundTimer(elapsed=seconds){
+  clearInterval(timer);
+  const startedAt=Date.now(),base=Math.max(0,Number(elapsed)||0);
+  const update=()=>{seconds=Math.floor(base+Math.max(0,Date.now()-startedAt)/1000);stats()};
+  update();timer=setInterval(update,1000);
+}
 function stats(){qs('degrees').textContent=degree+' / 6';qs('hints').textContent=hints;qs('backs').textContent=freeBacks;qs('time').textContent=fmt(seconds);qs('routeCount').textContent=degree+' connection'+(degree===1?'':'s')}
 function msg(t,c='hint'){if(!t){qs('message').innerHTML='';return}qs('message').innerHTML='<div class="msg '+c+'">'+esc(t)+'</div>'}
 function renderRoute(){
@@ -419,7 +425,7 @@ async function begin(level){
     rememberRound(puzzleId);
     qs('startName').textContent=start.name;qs('targetName').textContent=target.name;setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);applyHintMode(puzzle.hints_enabled!==false);
     qs('challengeInvite').classList.add('hidden');
-    qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();qs('movieInput').focus();if(challengeBenchmark)msg(challengeBenchmark.solved?'Score to beat: '+challengeBenchmark.points+'. Same actors, difficulty and hint mode.':'Your friend did not reach the target. Finish this puzzle to win.');timer=setInterval(()=>{seconds++;stats()},1000);
+    qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');await loadCurrent();qs('movieInput').focus();if(challengeBenchmark)msg(challengeBenchmark.solved?'Score to beat: '+challengeBenchmark.points+'. Same actors, difficulty and hint mode.':'Your friend did not reach the target. Finish this puzzle to win.');startRoundTimer();
   }catch(e){qs('loadTitle').textContent='Could not start game';qs('loadText').textContent=e.message;qs('retryStart').classList.remove('hidden');document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false)}
   finally{startingRound=false;qs('retryStart').disabled=false;qs('backToRules').disabled=false;qs('levelClapper').classList.add('hidden');qs('loading').setAttribute('aria-busy','false')}
 }
@@ -447,7 +453,7 @@ async function applyRoundSnapshot(d){
     qs('loading').classList.add('hidden');qs('gameShell').classList.remove('hidden');
     await loadCurrent();
     if(d.finished&&d.final_result){await finishRound(d.final_result.solved,d.final_result.gave_up===true,d.final_result);return}
-    clearInterval(timer);timer=setInterval(()=>{seconds++;stats()},1000);
+    startRoundTimer(d.elapsed_seconds);
     if(String(current.id)===String(target.id))await finishRound(true);
     else if(degree>=6)await finishRound(false);
 }
