@@ -200,6 +200,41 @@ async function run() {
   assert.equal(vm.runInContext('routeRevision', context), 3);
   assert.equal(vm.runInContext('hints', context), 0);
   assert.equal(nodes.currentName.textContent, 'Next');
+  // A lost hint response must recover charged usage without issuing another hint.
+  for(const failure of ['network','invalid-json','server']){
+    const level=failure==='network'?1:2;
+    const f=fixture();let hintCalls=0,roundCalls=0;
+    f.context.fetch=async url=>{
+      if(url.startsWith('/api/hint?')){
+        hintCalls++;
+        if(failure==='server')return {ok:false,status:503,json:async()=>({error:'Temporary outage'})};
+        if(failure==='invalid-json')return {ok:true,status:200,json:async()=>{throw Error('truncated JSON')}};
+        throw Error('response lost');
+      }
+      assert(url.startsWith('/api/round?'));roundCalls++;
+      return response({...snapshot(0,0),hints_used:level,free_backs:2});
+    };
+    await f.nodes['hint'+level].onclick();
+    assert.equal(hintCalls,1);assert.equal(roundCalls,1);
+    assert.equal(vm.runInContext('hints',f.context),level);
+    assert.equal(vm.runInContext('freeBacks',f.context),2);
+    assert.match(f.nodes.message.innerHTML,/saved hint usage/);
+  }
+  // Definite search failure adds no penalty and does not need a snapshot.
+  {
+    const f=fixture();let calls=0;
+    f.context.fetch=async url=>{calls++;assert(url.startsWith('/api/hint?'));return {ok:false,status:404,json:async()=>({error:'No verified hint route found'})}};
+    await f.nodes.hint1.onclick();assert.equal(calls,1);assert.equal(vm.runInContext('hints',f.context),0);
+  }
+  // If hint recovery also fails, block moves until the player recovers the round.
+  {
+    const f=fixture();f.context.fetch=async()=>{throw Error('offline')};
+    await f.nodes.hint2.onclick();
+    assert.equal(f.nodes.connect.disabled,true);assert.equal(f.nodes.retrySync.disabled,false);
+    assert.equal(f.nodes.retrySync.classList.contains('hidden'),false);
+  }
+  vm.runInContext("activeChallengeToken='expired';challengeBenchmark={points:20}",context);
+  nodes.difficultyOptions.classList.add('hidden');nodes.noHints.disabled=true;
   const previousClears = context.clearedTimers;
   context.fetch = async url => {
     if (url === '/api/backtrack') throw Error('request interrupted');
@@ -211,6 +246,9 @@ async function run() {
   assert.equal(nodes.loadTitle.textContent, 'Choose your level');
   assert.equal(nodes.gameShell.classList.contains('hidden'), true);
   assert.equal(nodes.loading.classList.contains('hidden'), false);
+  assert.equal(vm.runInContext('activeChallengeToken',context),null);
+  assert.equal(nodes.difficultyOptions.classList.contains('hidden'),false);
+  assert.equal(nodes.noHints.disabled,false);
   // A request can stall before headers or while reading the response body.
   for (const stalledBody of [false, true]) {
     const f = fixture();let fireDeadline;let deadlineCleared=false;
@@ -259,8 +297,18 @@ async function run() {
   await f.context.resumeRound('saved');
   assert.notEqual(f.context.savedRoundCleared,true);
   assert.equal(f.nodes.loadTitle.textContent,'Could not restore your round');
+  assert.equal(f.nodes.retryResume.classList.contains('hidden'),false);
+  f.context.fetch=async url=>{assert.equal(url,'/api/round?puzzle_id=saved');return response(snapshot(1,3))};
+  await f.nodes.retryResume.onclick();
+  assert.equal(f.nodes.retryResume.classList.contains('hidden'),true);
+  assert.equal(f.nodes.currentName.textContent,'Next');
+  vm.runInContext("activeChallengeToken='expired'",f.context);
+  f.nodes.difficultyOptions.classList.add('hidden');f.nodes.noHints.disabled=true;
   f.context.fetch=async()=>({ok:false,status:404,json:async()=>({error:'Puzzle expired or unknown'})});
   await f.context.resumeRound('saved');
+  assert.equal(vm.runInContext('activeChallengeToken',f.context),null);
+  assert.equal(f.nodes.difficultyOptions.classList.contains('hidden'),false);
+  assert.equal(f.nodes.noHints.disabled,false);
   assert.equal(f.context.savedRoundCleared,true);
   assert.equal(f.nodes.loadTitle.textContent,'Choose your level');
   // Search failures must not look like an empty cast list.

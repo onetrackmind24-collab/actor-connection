@@ -114,6 +114,7 @@ button:focus-visible{outline:3px solid var(--gold2);outline-offset:3px}
       <button class="difficulty" data-difficulty="expert"><strong>Expert</strong><small>Obscure performers; less obvious routes</small></button>
     </div>
     <button class="btn primary back-home hidden" id="retryStart">Retry Start</button>
+    <button class="btn primary back-home hidden" id="retryResume">Restore Saved Round</button>
     <button class="btn back-home" id="backToRules">← Rules</button>
   </section>
 
@@ -340,9 +341,14 @@ qs('back').onclick=async()=>{
   if(route.length<=1)return msg('You are already at the starting actor.','bad');
   try{let d=await get('/api/backtrack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,route_revision:routeRevision})});routeRevision=d.route_revision??routeRevision+1;route.pop();degree=d.degrees;current=d.current_actor;freeBacks=d.free_backs??freeBacks;await loadCurrent();msg('Backtracked. '+d.backtracks_used+' used • '+d.free_backs+' free • penalty '+(d.backtrack_penalty?'-'+d.backtrack_penalty:'0')+'.')}catch(e){await recoverAction(e)}
 };
+async function handleHintFailure(error){
+  if(error.message==='Puzzle expired or unknown'||error.status===409||![400,403,404].includes(error.status)){
+    await recoverAction(error,'Your saved hint usage is restored. Request the same hint again to display it.');
+  }else msg(hintError(error),'bad');
+}
 async function hint(level){return get('/api/hint?puzzle_id='+encodeURIComponent(puzzleId)+'&max='+encodeURIComponent(6-degree)+'&level='+level+'&route_revision='+routeRevision)}
-qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);freeBacks=h.free_backs??freeBacks;stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){if(e.message.startsWith('Your round changed.'))await recoverAction(e);else msg(hintError(e),'bad')}};
-qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);freeBacks=h.free_backs??freeBacks;stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){if(e.message.startsWith('Your round changed.'))await recoverAction(e);else msg(hintError(e),'bad')}};
+qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);freeBacks=h.free_backs??freeBacks;stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){await handleHintFailure(e)}};
+qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);freeBacks=h.free_backs??freeBacks;stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){await handleHintFailure(e)}};
 function shareSummary(result){
   const outcome=result.solved?result.degrees+' / 6 degrees • '+result.points+' points':'Target not reached • '+result.degrees+' / 6 degrees';
   const mode=result.hints_enabled===false?'No hints':result.hints_used+' hint level'+(result.hints_used===1?'':'s')+' used';
@@ -400,11 +406,11 @@ function applyHintMode(enabled){
   for(const id of ['hint1','hint2']){qs(id).disabled=!enabled;qs(id).classList.toggle('hidden',!enabled)}
   qs('difficultyBadge').textContent=difficulty+(enabled?'':' • No hints');
 }
-let startingRound=false;
+let startingRound=false,restoringRound=false;
 async function begin(level){
-  if(startingRound)return;
+  if(startingRound||restoringRound)return;
   startingRound=true;qs('backToRules').disabled=true;
-  qs('retryStart').classList.add('hidden');qs('retryStart').disabled=true;
+  qs('retryResume').classList.add('hidden');qs('retryStart').classList.add('hidden');qs('retryStart').disabled=true;
   qs('difficultyOptions').classList.toggle('hidden',!!activeChallengeToken);
   qs('loadingEyebrow').textContent=activeChallengeToken?'Challenge Mode':'Choose difficulty';
   const hintsEnabled=!qs('noHints').checked;
@@ -431,20 +437,21 @@ async function begin(level){
 }
 function leaveChallengeMode(){
   activeChallengeToken=null;challengeBenchmark=null;qs('noHints').disabled=false;
-  qs('retryStart').classList.add('hidden');qs('difficultyOptions').classList.remove('hidden');
+  qs('retryResume').classList.add('hidden');qs('retryStart').classList.add('hidden');qs('difficultyOptions').classList.remove('hidden');
   const url=new URL(location.href);url.searchParams.delete('challenge');history.replaceState(null,'',url.pathname+url.search+url.hash);
   qs('loadTitle').textContent='Choose your level';qs('loadText').textContent='Start a new round against the weekly featured actor.';
   qs('loadingEyebrow').textContent='Choose difficulty';
 }
 qs('retryStart').onclick=()=>begin(difficulty);
 qs('showDifficulty').onclick=()=>{refreshWeeklyFeature();qs('landing').classList.add('hidden');qs('loading').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
-qs('backToRules').onclick=()=>{if(startingRound)return;leaveChallengeMode();qs('loading').classList.add('hidden');qs('landing').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
+qs('backToRules').onclick=()=>{if(startingRound||restoringRound)return;leaveChallengeMode();qs('loading').classList.add('hidden');qs('landing').classList.remove('hidden');window.scrollTo({top:0,behavior:'smooth'})};
 document.querySelectorAll('.difficulty').forEach(b=>b.onclick=()=>begin(b.dataset.difficulty));
 qs('giveUp').onclick=async()=>{if(confirm('Give up this round?')){try{await finishRound(false,true)}catch(e){msg(e.message,'bad')}}};
 stats();
 async function applyRoundSnapshot(d){
     roundFinished=false;routeRevision=d.route_revision??0;puzzleId=d.puzzle_id;start=d.start;target=d.target;current=d.current_actor;difficulty=d.difficulty;
-    challengeBenchmark=d.challenge_benchmark||null;
+    activeChallengeToken=d.challenge_token||null;challengeBenchmark=d.challenge_benchmark||null;
+    qs('noHints').checked=d.hints_enabled===false;qs('noHints').disabled=!!activeChallengeToken;
     degree=d.degrees;hints=d.hints_used;freeBacks=d.free_backs;seconds=Math.floor(d.elapsed_seconds);
     route=[{actor:start,movie:null},...(d.live_route||[])];
     qs('startName').textContent=start.name;qs('targetName').textContent=target.name;
@@ -457,20 +464,20 @@ async function applyRoundSnapshot(d){
     if(String(current.id)===String(target.id))await finishRound(true);
     else if(degree>=6)await finishRound(false);
 }
-async function recoverAction(error){
+async function recoverAction(error,recoveredMessage='Your saved progress has been recovered. Check the current actor before your next move.'){
   if(pendingFinish){msg(error.message,'bad');return}
   roundSyncRequired=true;
   try{
     const d=await get('/api/round?puzzle_id='+encodeURIComponent(puzzleId));
     await applyRoundSnapshot(d);
     roundSyncRequired=false;qs('retrySync').classList.add('hidden');
-    if(!d.finished)msg('Your saved progress has been recovered. Check the current actor before your next move.','ok');
+    if(!d.finished)msg(recoveredMessage,'ok');
   }catch(e){
     if(pendingFinish){roundSyncRequired=false;qs('retrySync').classList.add('hidden');msg(e.message,'bad');return}
     if(e.message==='Puzzle expired or unknown'){
       clearInterval(timer);roundSyncRequired=false;rememberRound(null);qs('retrySync').classList.add('hidden');
       qs('gameShell').classList.add('hidden');qs('loading').classList.remove('hidden');
-      qs('loadTitle').textContent='Choose your level';qs('loadText').textContent='Your previous round expired. Rounds are kept for six hours.';
+      leaveChallengeMode();qs('loadText').textContent='Your previous round expired. Rounds are kept for six hours.';
       document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);return;
     }
     qs('retrySync').classList.remove('hidden');
@@ -478,6 +485,8 @@ async function recoverAction(error){
   }
 }
 async function resumeRound(id){
+  if(startingRound||restoringRound)return;
+  restoringRound=true;qs('retryResume').classList.add('hidden');qs('retryResume').disabled=true;qs('backToRules').disabled=true;
   qs('landing').classList.add('hidden');qs('loading').classList.remove('hidden');
   qs('loadTitle').textContent='Restoring your round…';
   qs('loadText').textContent='Recovering your saved route and hints.';
@@ -488,7 +497,7 @@ async function resumeRound(id){
     if(!d.finished)msg('Your round has been restored.','ok');
   }catch(e){
     if(e.status===404||e.status===409){
-      rememberRound(null);qs('loadTitle').textContent='Choose your level';
+      rememberRound(null);leaveChallengeMode();
       qs('loadText').textContent=e.status===409?'Your previous round has ended.':'Your previous round expired. Rounds are kept for six hours.';
       document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);return;
     }
@@ -497,9 +506,10 @@ async function resumeRound(id){
       qs('movieInput').disabled=true;qs('actorInput').disabled=true;msg(e.message,'bad');return;
     }
     qs('loadTitle').textContent='Could not restore your round';
-    qs('loadText').textContent='Your saved round is kept. Reload to retry, or choose a level to start a new round.';
+    qs('loadText').textContent='Your saved round is kept. Select Restore Saved Round to retry.';
+    qs('retryResume').onclick=()=>resumeRound(id);qs('retryResume').classList.remove('hidden');
     document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);
-  }
+  }finally{restoringRound=false;qs('retryResume').disabled=false;qs('backToRules').disabled=false}
 }
 async function loadChallenge(token){
   qs('landing').classList.add('hidden');qs('challengeInvite').classList.remove('hidden');
@@ -530,7 +540,7 @@ qs('newGame').onclick=()=>{
   puzzleId=null;routeRevision=0;degree=0;hints=0;seconds=0;freeBacks=1;route=[];selectedMovie=selectedActor=null;
   resultShareText='';closeDrop('movie',true);closeDrop('actor',true);msg('');
   qs('noHints').disabled=false;qs('shareFallback').classList.add('hidden');qs('shareStatus').textContent='';
-  qs('retryStart').classList.add('hidden');qs('difficultyOptions').classList.remove('hidden');
+  qs('retryResume').classList.add('hidden');qs('retryStart').classList.add('hidden');qs('difficultyOptions').classList.remove('hidden');
   qs('loadingEyebrow').textContent='Choose difficulty';
   const url=new URL(location.href);url.searchParams.delete('challenge');history.replaceState(null,'',url.pathname+url.search+url.hash);
   for(const id of ['result','gameShell','landing','challengeInvite','retryResult','retrySync'])qs(id).classList.add('hidden');
