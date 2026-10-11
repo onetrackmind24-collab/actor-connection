@@ -49,6 +49,43 @@ function snapshot(degrees, revision, backs = 0) {
 const response = data => ({ok: true, status: 200, json: async () => data});
 
 async function run() {
+  // A failed challenge start must not leak its actor pair into a regular round.
+  const failedStart=fixture();
+  failedStart.context.location.href='https://actor-connection.onrender.com/?challenge=invitation&keep=yes#game';
+  failedStart.context.performance={now:()=>0};
+  failedStart.context.window.matchMedia=()=>({matches:true});
+  failedStart.context.setTimeout=(callback,ms)=>ms>=30000?setTimeout(callback,ms):setImmediate(callback);
+  failedStart.context.sessionStorage.setItem=()=>{};
+  vm.runInContext("activeChallengeToken='invitation';challengeBenchmark={points:20}",failedStart.context);
+  failedStart.nodes.noHints.disabled=true;
+  failedStart.context.fetch=async()=>({ok:false,status:503,json:async()=>({error:'Temporary outage'})});
+  await failedStart.context.begin('custom');
+  assert.equal(failedStart.nodes.retryStart.classList.contains('hidden'),false);
+  assert.equal(failedStart.nodes.difficultyOptions.classList.contains('hidden'),true);
+  failedStart.context.fetch=async url=>{
+    if(url==='/api/status')return response({ready:true});
+    assert.equal(url,'/api/puzzle?challenge=invitation');
+    return response({puzzle_id:'retried-challenge',difficulty:'custom',verified:true,start:{id:5,name:'Fresh'},target:{id:9,name:'Target'},hints_enabled:false});
+  };
+  await failedStart.nodes.retryStart.onclick();
+  assert.equal(vm.runInContext('puzzleId',failedStart.context),'retried-challenge');
+  assert.equal(failedStart.nodes.retryStart.classList.contains('hidden'),true);
+  assert.equal(failedStart.nodes.hint1.classList.contains('hidden'),true);
+  // Returning to the rules after another start failure clears the invitation.
+  failedStart.context.fetch=async()=>({ok:false,status:503,json:async()=>({error:'Temporary outage'})});
+  await failedStart.context.begin('custom');
+  failedStart.nodes.backToRules.onclick();
+  assert.equal(vm.runInContext('activeChallengeToken',failedStart.context),null);
+  assert.equal(failedStart.nodes.noHints.disabled,false);
+  assert.equal(failedStart.context.updatedUrl,'/?keep=yes#game');
+  failedStart.context.fetch=async url=>{
+    if(url==='/api/status')return response({ready:true});
+    assert(url.startsWith('/api/puzzle?difficulty=beginner&hints='));
+    assert(!url.includes('challenge='));
+    return response({puzzle_id:'regular-after-failure',difficulty:'beginner',verified:true,start:{id:5,name:'Fresh'},target:{id:9,name:'Target'},hints_enabled:true});
+  };
+  await failedStart.context.begin('beginner');
+  assert.equal(vm.runInContext('puzzleId',failedStart.context),'regular-after-failure');
   const custom=fixture();
   custom.nodes.customStart.value='Jack Nicholson';custom.nodes.customTarget.value='Gedde Watanabe';
   custom.nodes.customNoHints.checked=true;
@@ -291,6 +328,7 @@ async function run() {
     assert.equal(vm.runInContext('puzzleId',f.context),null);
     assert.equal(f.context.updatedUrl,'/?keep=yes#game');
     assert.equal(f.nodes.loading.classList.contains('hidden'),false);
+    assert.equal(f.nodes.difficultyOptions.classList.contains('hidden'),false);
     assert.equal(f.nodes.result.classList.contains('hidden'),true);
     assert.equal(f.nodes.noHints.disabled,false);
     assert.equal(f.nodes.loadTitle.focused,true);

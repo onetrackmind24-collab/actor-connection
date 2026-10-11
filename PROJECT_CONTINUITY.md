@@ -335,3 +335,13 @@ User requested that evolving detailed rules stop cluttering How to Play. Landing
 ### Live verification completed
 
 Version35 custom creation UI resolved Jack Nicholson and Gedde Watanabe, created a private unscored invitation, opened it, and completed a valid two-move solve: Nicholson -> A Few Good Men -> Kevin Pollak -> That Thing You Do! -> Watanabe. Server result: solved, 2 degrees, Deep Cut 0 after hint disclosure, free backs 1, score130 with Cut4 and hint penalty20. Preview benchmark remained null and route stayed private. Do not reveal this solution in the invitation or user-facing share text. Version36 default remains beta with weekly previews; launch setting must be enabled as part of launch, not during current beta.
+
+
+
+## October 10 — challenge startup recovery (v37)
+
+Reproduced frontend bug: challenge startup error followed by Rules/regular difficulty selection retained activeChallengeToken and the locked hint mode, causing a supposed regular round to use the old challenge pair. Added explicit Retry Start to retry the same mode/pair, hide normal difficulty options during fixed challenge startup, clear challenge token/benchmark and unlock hint choice when returning to Rules or regular play, preserve unrelated query/hash parameters, and restore difficulty selection after finishing a challenge/New Game. Regression first failed on the retained invitation token, then passed after the fix; also tests successful retry with immutable no-hints mode. Updated the separate scoring reference to explain the 100-point Cut baseline and over-Cut floor; main instructions stay clean. Beta preview and launch target privacy stay in effect.
+
+Additional confirmed business requirements from user: players will never pay; monetization is advertising only. Optional rewarded-ad hints are intended for all modes, including challenges/head-to-head, with an ad for every chosen ad-supported hint and the same competitive hint penalty. No ad provider integration is active in this build; do not add paywalls or free scoring exceptions.
+
+Verification before deployment: all 27 backend tests and frontend regressions passed. Live existing-server checks completed Beginner Sandra Bullock (105), Intermediate John C. Reilly (80), Expert no-hints Jack Riley (403 on hint, intentional give-up0), and a separate Expert Lu Elrod solve with hints (105). Each tested saved-round recovery, final result retry consistency, finished-round mutation rejection, and invitation actor/hint-mode/benchmark preservation. The Expert solve is separate from the intentional no-hints give-up check. Runtime API behavior is unchanged in v37 apart from the build marker; verify updated frontend after rollout.
