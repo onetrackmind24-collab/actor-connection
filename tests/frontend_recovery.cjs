@@ -125,6 +125,46 @@ async function run() {
   const hiddenShare=custom.context.shareSummary({solved:true,degrees:2,points:80,hints_used:0,target_hidden:true,challenge_token:'launch'});
   assert.match(hiddenShare,/Start → Hidden target/);
   assert.equal(hiddenShare.includes('→ Target'),false);
+  // Do not let a fast Accept replace a saved attempt before its lookup finishes.
+  for(const lookup of ['same','different','offline']){
+    const f=fixture();f.context.sessionStorage.getItem=()=> 'saved';
+    let resolveRound,lookupCalls=0,startCalls=0;
+    f.context.fetch=async url=>{
+      if(url.startsWith('/api/challenge?'))return response({start:{name:'Start'},target:{name:'Target'},difficulty:'custom',hints_enabled:true,benchmark:null});
+      if(url.startsWith('/api/puzzle?')){startCalls++;throw Error('must not start during lookup')}
+      assert.equal(url,'/api/round?puzzle_id=saved');lookupCalls++;
+      if(lookupCalls===1)return new Promise(resolve=>{resolveRound=resolve});
+      return response({...snapshot(1,4),challenge_token:'invite'});
+    };
+    const opening=f.context.loadChallenge('invite');
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(f.nodes.acceptChallenge.disabled,true);
+    if(f.nodes.acceptChallenge.onclick)await f.nodes.acceptChallenge.onclick();
+    assert.equal(startCalls,0);
+    resolveRound(lookup==='offline'?{ok:false,status:503,json:async()=>({error:'outage'})}:response({...snapshot(1,4),challenge_token:lookup==='same'?'invite':'other'}));
+    await opening;
+    if(lookup==='same'){
+      assert.equal(f.nodes.currentName.textContent,'Next');
+      assert.equal(f.nodes.challengeInvite.classList.contains('hidden'),true);
+      assert.equal(lookupCalls,2);
+    }else{
+      assert.equal(f.nodes.resumeExisting.classList.contains('hidden'),false);
+      assert.equal(f.nodes.acceptChallenge.disabled,false);
+      assert.notEqual(f.context.savedRoundCleared,true);
+      await f.nodes.resumeExisting.onclick();
+      assert.equal(f.nodes.currentName.textContent,'Next');
+    }
+  }
+  // Leaving an invitation while its saved-round check is pending must cancel auto-resume.
+  {
+    const f=fixture();f.context.sessionStorage.getItem=()=> 'saved';let release;
+    f.context.fetch=async url=>url.startsWith('/api/challenge?')?response({start:{name:'Start'},target:{name:'Target'},difficulty:'custom',hints_enabled:true}):new Promise(resolve=>release=resolve);
+    const opening=f.context.loadChallenge('invite');await new Promise(resolve=>setImmediate(resolve));
+    f.nodes.normalGame.onclick();release(response({...snapshot(1,3),challenge_token:'invite'}));await opening;
+    assert.equal(vm.runInContext('activeChallengeToken',f.context),null);
+    assert.equal(f.nodes.landing.classList.contains('hidden'),false);
+    assert.notEqual(f.nodes.currentName.textContent,'Next');
+  }
   const weekly=fixture();
   weekly.context.fetch=async()=>response({weekly_schedule:{name:'Matt Damon',rotation_enabled:true,
     next_name:'Tom Hanks',changes_at:'2026-10-12T00:00:00-04:00'}});

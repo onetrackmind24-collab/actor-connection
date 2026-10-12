@@ -513,25 +513,31 @@ async function resumeRound(id){
 }
 async function loadChallenge(token){
   qs('landing').classList.add('hidden');qs('challengeInvite').classList.remove('hidden');
+  qs('acceptChallenge').disabled=true;qs('resumeExisting').classList.add('hidden');qs('challengeNote').textContent='';
   activeChallengeToken=token;
   try{
     const c=await get('/api/challenge?token='+encodeURIComponent(token));
+    if(activeChallengeToken!==token)return;
     qs('challengeTitle').textContent=c.start.name+' → '+(c.target_hidden?'Hidden target':c.target.name);
     qs('challengeDetails').textContent=(c.benchmark?(c.benchmark.solved?'Score to beat: '+c.benchmark.points+'.':'Your friend did not reach the target. Finish to win.'):'Custom actor challenge. Reach the target in six connections or fewer.')+' '+c.difficulty+' • '+(c.hints_enabled?'Hints allowed':'No hints')+'. Link valid for seven days.';
     if(c.scoring_version===1)qs('challengeDetails').textContent+=' This older challenge keeps its original scoring; the six-connection hint penalty does not apply.';
-    qs('acceptChallenge').disabled=false;
-    qs('acceptChallenge').onclick=()=>{qs('noHints').checked=!c.hints_enabled;qs('noHints').disabled=true;qs('challengeInvite').classList.add('hidden');qs('loading').classList.remove('hidden');begin(c.difficulty)};
     const saved=rememberedRound();
     if(saved){
-      try{
-        const round=await get('/api/round?puzzle_id='+encodeURIComponent(saved));
-        if(round.challenge_token===token){qs('challengeInvite').classList.add('hidden');await resumeRound(saved);return}
-        qs('challengeNote').textContent='You have a saved round. Resume it, or start this challenge instead.';
-        qs('resumeExisting').classList.remove('hidden');
-        qs('resumeExisting').onclick=()=>{qs('challengeInvite').classList.add('hidden');resumeRound(saved)};
-      }catch(_){}
+      qs('challengeNote').textContent='Checking your saved round…';
+      let round=null,lookupFailed=false;
+      try{round=await get('/api/round?puzzle_id='+encodeURIComponent(saved))}catch(_){lookupFailed=true}
+      if(activeChallengeToken!==token)return;
+      if(round?.challenge_token===token){qs('challengeInvite').classList.add('hidden');await resumeRound(saved);return}
+      qs('challengeNote').textContent=lookupFailed?'Could not check your saved round. Resume it to retry, or accept this challenge to start a new round.':'You have a saved round. Resume it, or start this challenge instead.';
+      qs('resumeExisting').classList.remove('hidden');
+      qs('resumeExisting').onclick=()=>{if(activeChallengeToken!==token)return;qs('challengeInvite').classList.add('hidden');return resumeRound(saved)};
     }
-  }catch(e){qs('challengeTitle').textContent='Challenge unavailable';qs('challengeDetails').textContent=e.message}
+    qs('acceptChallenge').onclick=()=>{
+      if(qs('acceptChallenge').disabled||activeChallengeToken!==token)return;
+      qs('noHints').checked=!c.hints_enabled;qs('noHints').disabled=true;qs('challengeInvite').classList.add('hidden');qs('loading').classList.remove('hidden');return begin(c.difficulty);
+    };
+    qs('acceptChallenge').disabled=false;
+  }catch(e){if(activeChallengeToken!==token)return;qs('challengeTitle').textContent='Challenge unavailable';qs('challengeDetails').textContent=e.message}
 }
 qs('newGame').onclick=()=>{
   if(!roundFinished||pendingFinish)return;
