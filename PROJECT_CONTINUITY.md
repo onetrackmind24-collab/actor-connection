@@ -377,3 +377,12 @@ Reproduced HUD under-reporting when another copied tab had already used Hint2: a
 The free-back HUD previously displayed the full allowance even after consuming it. It now says Free backs left and displays max(0,free_backs-backtracks_used), including earned or removed Deep Cut allowance and round recovery. Backtrack confirmation states remaining allowance; final HUD refreshes from authoritative result counters. The separate scoring reference explains the remaining counter and removal of rolled-back Deep Cut rewards. Main instructions remain clean. Scoring, paid-back calculation, hint penalties, credit eligibility, target privacy and all other rules are unchanged.
 
 Regression tests failed before the fix on frontend hint1-versus2 and missing server hints_used response. After the fix all28 backend tests and the full frontend suite passed. Frontend covers already-used higher hint level, consumed free backs, recovered earned allowance and paid-back feedback. Backend covers repeated Hint1 after Hint2, persisted usage, consistent movie and no extra disclosure. Live UI and API verification remain required after rollout.
+
+
+## October13 evening — difficulty names and expired result recovery (v42)
+
+User selected Casual / Film Buff / Cinephile to replace Beginner / Intermediate / Expert, in that order. Apply labels to chooser, gameplay badge, challenge invitations and copied result sharing; keep internal beginner/intermediate/expert identifiers to preserve existing saved rounds, challenges, starter pools and scoring history. Custom invitations display Custom Challenge.
+
+Reproduced stuck-result bug: an expired round's Give Up or Retry result left pendingFinish locked forever with no way to choose a new game. Confirmed Puzzle expired or unknown from result now clears only the expired saved round, pending-result/sync locks and old challenge settings, hides retry buttons and returns to the normal chooser. Temporary network/server errors still retain progress and Retry result. Common expiry handling is reused for interrupted action recovery. Regression first failed on retained pendingFinish; covers direct result expiry, expiry after an interrupted result, and starting a fresh round afterward.
+
+Version41 live checks completed: Ryan Gosling to Tom Hanks solved100 after Hint2 then Hint1, two backtracks (first free, second5), saved recovery, no hinted-film Deep Cut rewards and consistent retried final result. Browser Jennifer Lawrence round retained hint2 and zero free backs after a free backtrack/reload.

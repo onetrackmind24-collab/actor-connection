@@ -109,9 +109,9 @@ button:focus-visible{outline:3px solid var(--gold2);outline-offset:3px}
     <p id="weeklyLevel" class="weekly-feature hidden" aria-live="polite"></p>
     <label style="display:block;margin:16px 0"><input type="checkbox" id="noHints"> Play without hints</label>
     <div class="difficulty-grid" id="difficultyOptions">
-      <button class="difficulty" data-difficulty="beginner"><strong>Beginner</strong><small>Well-known stars; familiar movies</small></button>
-      <button class="difficulty" data-difficulty="intermediate"><strong>Intermediate</strong><small>Recognizable stars and character actors</small></button>
-      <button class="difficulty" data-difficulty="expert"><strong>Expert</strong><small>Obscure performers; less obvious routes</small></button>
+      <button class="difficulty" data-difficulty="beginner"><strong>Casual</strong><small>Well-known stars; familiar movies</small></button>
+      <button class="difficulty" data-difficulty="intermediate"><strong>Film Buff</strong><small>Recognizable stars and character actors</small></button>
+      <button class="difficulty" data-difficulty="expert"><strong>Cinephile</strong><small>Obscure performers; less obvious routes</small></button>
     </div>
     <button class="btn primary back-home hidden" id="retryStart">Retry Start</button>
     <button class="btn primary back-home hidden" id="retryResume">Restore Saved Round</button>
@@ -136,7 +136,7 @@ button:focus-visible{outline:3px solid var(--gold2);outline-offset:3px}
       <div class="hud-item"><b id="hints">0</b><span>Hints</span></div>
       <div class="hud-item"><b id="backs">1</b><span>Free backs left</span></div>
       <div class="hud-item"><b id="time">00:00</b><span>Time</span></div>
-      <div class="difficulty-badge" id="difficultyBadge">Expert</div>
+      <div class="difficulty-badge" id="difficultyBadge">Cinephile</div>
     </section>
 
     <section class="workspace" id="workspace">
@@ -352,7 +352,7 @@ qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await
 function shareSummary(result){
   const outcome=result.solved?result.degrees+' / 6 degrees • '+result.points+' points':'Target not reached • '+result.degrees+' / 6 degrees';
   const mode=result.hints_enabled===false?'No hints':result.hints_used+' hint level'+(result.hints_used===1?'':'s')+' used';
-  return ['MAKE THE CUT',start.name+' → '+(result.target_hidden?'Hidden target':target.name),outcome,difficulty+' • '+mode,'Can you beat my score on the same puzzle?','https://actor-connection.onrender.com/?challenge='+encodeURIComponent(result.challenge_token)].join('\n');
+  return ['MAKE THE CUT',start.name+' → '+(result.target_hidden?'Hidden target':target.name),outcome,difficultyName(difficulty)+' • '+mode,'Can you beat my score on the same puzzle?','https://actor-connection.onrender.com/?challenge='+encodeURIComponent(result.challenge_token)].join('\n');
 }
 qs('shareResult').onclick=async()=>{
   if(!resultShareText)return;
@@ -375,7 +375,7 @@ async function finishRound(solved,gaveUp=false,recoveredResult=null){
   pendingFinish={solved,gaveUp};
   let rd;
   try{rd=recoveredResult||await get('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})})}
-  catch(e){qs('retryResult').classList.remove('hidden');throw Error(e.message+' Your result is pending. Select Retry result.')}
+  catch(e){if(e.message==='Puzzle expired or unknown'){expireSavedRound();return}qs('retryResult').classList.remove('hidden');throw Error(e.message+' Your result is pending. Select Retry result.')}
   hints=rd.hints_used??hints;backtracksUsed=rd.backtracks_used??backtracksUsed;freeBacks=rd.free_backs??freeBacks;stats();
   pendingFinish=null;roundFinished=true;for(const id of ['connect','back','hint1','hint2','giveUp','retrySync','retryResult','movieInput','actorInput'])qs(id).disabled=true;qs('retryResult').classList.add('hidden');
   resultShareText=shareSummary(rd);
@@ -403,9 +403,10 @@ async function finishRound(solved,gaveUp=false,recoveredResult=null){
   }
   qs('resultTitle').focus({preventScroll:true});qs('result').scrollIntoView({behavior:'smooth',block:'start'});
 }
+function difficultyName(level){return ({beginner:'Casual',intermediate:'Film Buff',expert:'Cinephile',custom:'Custom Challenge'})[level]||level}
 function applyHintMode(enabled){
   for(const id of ['hint1','hint2']){qs(id).disabled=!enabled;qs(id).classList.toggle('hidden',!enabled)}
-  qs('difficultyBadge').textContent=difficulty+(enabled?'':' • No hints');
+  qs('difficultyBadge').textContent=difficultyName(difficulty)+(enabled?'':' • No hints');
 }
 let startingRound=false,restoringRound=false;
 async function begin(level){
@@ -465,21 +466,27 @@ async function applyRoundSnapshot(d){
     if(String(current.id)===String(target.id))await finishRound(true);
     else if(degree>=6)await finishRound(false);
 }
+function expireSavedRound(){
+  clearInterval(timer);rememberRound(null);pendingFinish=null;roundSyncRequired=false;roundFinished=false;puzzleId=null;
+  for(const id of ['gameShell','retrySync','retryResult'])qs(id).classList.add('hidden');
+  qs('loading').classList.remove('hidden');leaveChallengeMode();
+  qs('loadText').textContent='Your previous round expired. Rounds are kept for six hours. Start a new round to play again.';
+  document.querySelectorAll('.difficulty').forEach(button=>button.disabled=false);
+  qs('loadTitle').focus({preventScroll:true});
+}
 async function recoverAction(error,recoveredMessage='Your saved progress has been recovered. Check the current actor before your next move.'){
   if(pendingFinish){msg(error.message,'bad');return}
   roundSyncRequired=true;
   try{
     const d=await get('/api/round?puzzle_id='+encodeURIComponent(puzzleId));
     await applyRoundSnapshot(d);
+    if(!puzzleId)return;
     roundSyncRequired=false;qs('retrySync').classList.add('hidden');
     if(!d.finished)msg(recoveredMessage,'ok');
   }catch(e){
     if(pendingFinish){roundSyncRequired=false;qs('retrySync').classList.add('hidden');msg(e.message,'bad');return}
     if(e.message==='Puzzle expired or unknown'){
-      clearInterval(timer);roundSyncRequired=false;rememberRound(null);qs('retrySync').classList.add('hidden');
-      qs('gameShell').classList.add('hidden');qs('loading').classList.remove('hidden');
-      leaveChallengeMode();qs('loadText').textContent='Your previous round expired. Rounds are kept for six hours.';
-      document.querySelectorAll('.difficulty').forEach(b=>b.disabled=false);return;
+      expireSavedRound();return;
     }
     qs('retrySync').classList.remove('hidden');
     msg('Could not confirm your saved progress. Select Recover round before making another move. '+e.message,'bad');
@@ -495,7 +502,7 @@ async function resumeRound(id){
   try{
     const d=await get('/api/round?puzzle_id='+encodeURIComponent(id));
     await applyRoundSnapshot(d);
-    if(!d.finished)msg('Your round has been restored.','ok');
+    if(puzzleId&&!d.finished)msg('Your round has been restored.','ok');
   }catch(e){
     if(e.status===404||e.status===409){
       rememberRound(null);leaveChallengeMode();
@@ -520,7 +527,7 @@ async function loadChallenge(token){
     const c=await get('/api/challenge?token='+encodeURIComponent(token));
     if(activeChallengeToken!==token)return;
     qs('challengeTitle').textContent=c.start.name+' → '+(c.target_hidden?'Hidden target':c.target.name);
-    qs('challengeDetails').textContent=(c.benchmark?(c.benchmark.solved?'Score to beat: '+c.benchmark.points+'.':'Your friend did not reach the target. Finish to win.'):'Custom actor challenge. Reach the target in six connections or fewer.')+' '+c.difficulty+' • '+(c.hints_enabled?'Hints allowed':'No hints')+'. Link valid for seven days.';
+    qs('challengeDetails').textContent=(c.benchmark?(c.benchmark.solved?'Score to beat: '+c.benchmark.points+'.':'Your friend did not reach the target. Finish to win.'):'Custom actor challenge. Reach the target in six connections or fewer.')+' '+difficultyName(c.difficulty)+' • '+(c.hints_enabled?'Hints allowed':'No hints')+'. Link valid for seven days.';
     if(c.scoring_version===1)qs('challengeDetails').textContent+=' This older challenge keeps its original scoring; the six-connection hint penalty does not apply.';
     const saved=rememberedRound();
     if(saved){

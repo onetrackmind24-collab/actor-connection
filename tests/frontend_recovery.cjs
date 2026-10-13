@@ -418,6 +418,32 @@ async function run() {
     assert.equal(vm.runInContext('selectedActor',f.context),null);
     assert.equal(f.nodes.actorDrop.classList.contains('hidden'),true);
   }
+  // A result that definitively expires must release Retry result and challenge mode.
+  for(const interrupted of [false,true]){
+    const f=fixture();f.context.confirm=()=>true;
+    vm.runInContext("activeChallengeToken='expired'",f.context);
+    f.nodes.noHints.disabled=true;f.nodes.difficultyOptions.classList.add('hidden');
+    if(interrupted){
+      f.context.fetch=async()=>{throw Error('offline')};await f.nodes.giveUp.onclick();
+      assert.notEqual(f.context.savedRoundCleared,true);
+      assert.equal(f.nodes.connect.disabled,true);
+      assert.equal(f.nodes.retryResult.disabled,false);
+    }
+    f.context.fetch=async()=>({ok:false,status:404,json:async()=>({error:'Puzzle expired or unknown'})});
+    await f.nodes[interrupted?'retryResult':'giveUp'].onclick();
+    assert.equal(vm.runInContext('pendingFinish',f.context),null);
+    assert.equal(f.context.savedRoundCleared,true);
+    assert.equal(f.nodes.retryResult.classList.contains('hidden'),true);
+    assert.equal(f.nodes.loadTitle.textContent,'Choose your level');
+    assert.equal(f.nodes.difficultyOptions.classList.contains('hidden'),false);
+    assert.equal(f.nodes.noHints.disabled,false);
+    // Starting a fresh round after expiry must not retain pending-result locks.
+    f.context.performance={now:()=>0};f.context.window.matchMedia=()=>({matches:true});
+    f.context.setTimeout=(callback,ms)=>ms>=30000?setTimeout(callback,ms):setImmediate(callback);
+    f.context.fetch=async url=>url==='/api/status'?response({ready:true}):response({puzzle_id:'fresh-after-expiry',difficulty:'beginner',verified:true,start:{id:5,name:'Fresh'},target:{id:9,name:'Target'},hints_enabled:true});
+    await f.context.begin('beginner');assert.equal(f.nodes.connect.disabled,false);
+    assert.equal(f.nodes.difficultyBadge.textContent,'Casual');
+  }
   // Completed rounds lock controls and New Game leaves challenge mode without reload.
   {
     const f=fixture();f.context.location.href='https://actor-connection.onrender.com/?challenge=old&keep=yes#game';
