@@ -376,6 +376,23 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(self.round['hints_used'],1)
         self.assertNotIn(actor,self.round['hint_routes'])
 
+    def test_repeated_lower_hint_reports_authoritative_usage_and_backtracks(self):
+        self.round['backtracks_used']=1
+        def ask(level):
+            return self.request('/api/hint?'+urllib.parse.urlencode({'puzzle_id':self.pid,'level':level,'route_revision':0}))
+        status,actor_hint=ask(2)
+        self.assertEqual(status,200)
+        status,movie_hint=ask(1)
+        self.assertEqual(status,200)
+        self.assertEqual(movie_hint['level'],1)
+        self.assertEqual(movie_hint['hints_used'],2)
+        self.assertEqual(movie_hint['backtracks_used'],1)
+        self.assertEqual(actor_hint['movie'],movie_hint['movie'])
+        self.assertEqual(self.round['hints_used'],2)
+        self.assertEqual(len(self.round['hinted_movie_ids']),1)
+        saved=self.game.load_active_puzzles()[self.pid]
+        self.assertEqual(saved['hints_used'],2)
+
     def test_hinted_movie_never_earns_deep_points_or_bonus_backs(self):
         game=self.game
         with patch.object(game,'connection_deep_cut',return_value=15):

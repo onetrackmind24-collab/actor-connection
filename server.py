@@ -1284,7 +1284,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-12-saved-challenge-guard-v40','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-13-authoritative-hint-hud-v41','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1404,7 +1404,7 @@ class Handler(SimpleHTTPRequestHandler):
                 earned_deep,_=deep_cut_for_route(proposed['start']['id'],proposed.get('live_route',[]),proposed['hinted_movie_ids'])
                 puzzle.update(proposed)
                 save_active_puzzles()
-                out={'level':level,'movie':first['movie'],'free_backs':1+earned_deep//10,'deep_cut_bank':earned_deep}
+                out={'level':level,'hints_used':proposed['hints_used'],'backtracks_used':int(proposed.get('backtracks_used',0)),'movie':first['movie'],'free_backs':1+earned_deep//10,'deep_cut_bank':earned_deep}
                 if level>=2: out['actor']=first['actor']
                 return self.send_json(out)
             if u.path not in PUBLIC_FILES:
@@ -1479,7 +1479,7 @@ class Handler(SimpleHTTPRequestHandler):
                 free_backs=1+(earned_deep//10)
                 puzzle.update(proposed)
                 save_active_puzzles()
-                return self.send_json({'valid':True,'degrees':degrees,'route_revision':proposed['route_revision'],'remaining':remaining,'current_actor':step['actor'],'solved':solved,'limit_reached':degrees>=6,'free_backs':free_backs,'deep_cut_bank':earned_deep,'viability':viability,'dead_end':viability=='dead_end'})
+                return self.send_json({'valid':True,'degrees':degrees,'route_revision':proposed['route_revision'],'remaining':remaining,'backtracks_used':int(proposed.get('backtracks_used',0)),'current_actor':step['actor'],'solved':solved,'limit_reached':degrees>=6,'free_backs':free_backs,'deep_cut_bank':earned_deep,'viability':viability,'dead_end':viability=='dead_end'})
             if self.path=='/api/backtrack':
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)

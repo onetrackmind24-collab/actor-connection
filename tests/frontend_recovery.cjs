@@ -260,6 +260,18 @@ async function run() {
     assert.equal(vm.runInContext('freeBacks',f.context),2);
     assert.match(f.nodes.message.innerHTML,/saved hint usage/);
   }
+  // A copied tab's successful lower hint must show the already-used higher level.
+  {
+    const f=fixture();f.context.fetch=async()=>response({level:1,hints_used:2,backtracks_used:1,free_backs:1,movie:{id:5,title:'Film'}});
+    await f.nodes.hint1.onclick();
+    assert.equal(f.nodes.hints.textContent,2);assert.equal(f.nodes.backs.textContent,0);
+    // A recovered route may earn extra free backs or lose them after backtracking.
+    await f.context.applyRoundSnapshot({...snapshot(1,3,1),free_backs:3});
+    assert.equal(f.nodes.backs.textContent,2);
+    f.context.fetch=async()=>response({route_revision:4,degrees:0,current_actor:{id:1,name:'Start'},backtracks_used:2,free_backs:1,backtrack_penalty:5});
+    await f.nodes.back.onclick();assert.equal(f.nodes.backs.textContent,0);
+    assert.match(f.nodes.message.innerHTML,/0 free remaining.*penalty -5/);
+  }
   // Definite search failure adds no penalty and does not need a snapshot.
   {
     const f=fixture();let calls=0;

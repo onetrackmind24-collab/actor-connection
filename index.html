@@ -134,7 +134,7 @@ button:focus-visible{outline:3px solid var(--gold2);outline-offset:3px}
     <section class="panel hud">
       <div class="hud-item"><b id="degrees">0 / 6</b><span>Degrees</span></div>
       <div class="hud-item"><b id="hints">0</b><span>Hints</span></div>
-      <div class="hud-item"><b id="backs">1</b><span>Free backs</span></div>
+      <div class="hud-item"><b id="backs">1</b><span>Free backs left</span></div>
       <div class="hud-item"><b id="time">00:00</b><span>Time</span></div>
       <div class="difficulty-badge" id="difficultyBadge">Expert</div>
     </section>
@@ -182,7 +182,7 @@ button:focus-visible{outline:3px solid var(--gold2);outline-offset:3px}
 const IMG='https://image.tmdb.org/t/p/w342';
 const qs=id=>document.getElementById(id);
 let pendingFinish=null,roundSyncRequired=false,routeRevision=0,roundFinished=false;
-let start,target,current,puzzleId=null,degree=0,hints=0,seconds=0,timer,route=[],selectedMovie,selectedActor,movieSeq=0,actorSeq=0,freeBacks=1,difficulty='expert';
+let start,target,current,puzzleId=null,degree=0,hints=0,seconds=0,timer,route=[],selectedMovie,selectedActor,movieSeq=0,actorSeq=0,freeBacks=1,backtracksUsed=0,difficulty='expert';
 let resultShareText='';
 let activeChallengeToken=null;
 let challengeBenchmark=null;
@@ -250,7 +250,7 @@ function startRoundTimer(elapsed=seconds){
   const update=()=>{seconds=Math.floor(base+Math.max(0,Date.now()-startedAt)/1000);stats()};
   update();timer=setInterval(update,1000);
 }
-function stats(){qs('degrees').textContent=degree+' / 6';qs('hints').textContent=hints;qs('backs').textContent=freeBacks;qs('time').textContent=fmt(seconds);qs('routeCount').textContent=degree+' connection'+(degree===1?'':'s')}
+function stats(){qs('degrees').textContent=degree+' / 6';qs('hints').textContent=hints;qs('backs').textContent=Math.max(0,freeBacks-backtracksUsed);qs('time').textContent=fmt(seconds);qs('routeCount').textContent=degree+' connection'+(degree===1?'':'s')}
 function msg(t,c='hint'){if(!t){qs('message').innerHTML='';return}qs('message').innerHTML='<div class="msg '+c+'">'+esc(t)+'</div>'}
 function renderRoute(){
   if(!route.length){qs('route').innerHTML='';return}
@@ -331,7 +331,7 @@ qs('connect').onclick=async()=>{
   try{
     let d=await get('/api/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,route_revision:routeRevision,movie_id:selectedMovie.id,movie_title:selectedMovie.title,next_actor_id:selectedActor.id,actor_name:selectedActor.name,connection_token:selectedActor.connection_token||''})});
     if(!d.valid)return msg('Invalid connection','bad');
-    routeRevision=d.route_revision??routeRevision+1;degree=d.degrees;current=d.current_actor;freeBacks=d.free_backs??freeBacks;route.push({actor:current,movie:{id:selectedMovie.id,title:selectedMovie.title}});msg('Connection accepted.','ok');
+    routeRevision=d.route_revision??routeRevision+1;degree=d.degrees;current=d.current_actor;backtracksUsed=d.backtracks_used??backtracksUsed;freeBacks=d.free_backs??freeBacks;route.push({actor:current,movie:{id:selectedMovie.id,title:selectedMovie.title}});msg('Connection accepted.','ok');
     if(String(current.id)===String(target.id))return await finishRound(true);
     if(degree>=6)return await finishRound(false);
     await loadCurrent();if(d.dead_end)msg('DEAD END — No verified route reaches the target within your remaining connections. Backtrack or give up.','bad');
@@ -339,7 +339,7 @@ qs('connect').onclick=async()=>{
 };
 qs('back').onclick=async()=>{
   if(route.length<=1)return msg('You are already at the starting actor.','bad');
-  try{let d=await get('/api/backtrack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,route_revision:routeRevision})});routeRevision=d.route_revision??routeRevision+1;route.pop();degree=d.degrees;current=d.current_actor;freeBacks=d.free_backs??freeBacks;await loadCurrent();msg('Backtracked. '+d.backtracks_used+' used • '+d.free_backs+' free • penalty '+(d.backtrack_penalty?'-'+d.backtrack_penalty:'0')+'.')}catch(e){await recoverAction(e)}
+  try{let d=await get('/api/backtrack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,route_revision:routeRevision})});routeRevision=d.route_revision??routeRevision+1;route.pop();degree=d.degrees;current=d.current_actor;backtracksUsed=d.backtracks_used??backtracksUsed;freeBacks=d.free_backs??freeBacks;await loadCurrent();msg('Backtracked. '+d.backtracks_used+' used • '+Math.max(0,freeBacks-backtracksUsed)+' free remaining • penalty '+(d.backtrack_penalty?'-'+d.backtrack_penalty:'0')+'.')}catch(e){await recoverAction(e)}
 };
 async function handleHintFailure(error){
   if(error.message==='Puzzle expired or unknown'||error.status===409||![400,403,404].includes(error.status)){
@@ -347,8 +347,8 @@ async function handleHintFailure(error){
   }else msg(hintError(error),'bad');
 }
 async function hint(level){return get('/api/hint?puzzle_id='+encodeURIComponent(puzzleId)+'&max='+encodeURIComponent(6-degree)+'&level='+level+'&route_revision='+routeRevision)}
-qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,1);freeBacks=h.free_backs??freeBacks;stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){await handleHintFailure(e)}};
-qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,2);freeBacks=h.free_backs??freeBacks;stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){await handleHintFailure(e)}};
+qs('hint1').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(1);hints=Math.max(hints,h.hints_used??1);backtracksUsed=h.backtracks_used??backtracksUsed;freeBacks=h.free_backs??freeBacks;stats();msg('Hint 1 — Movie: '+h.movie.title)}catch(e){await handleHintFailure(e)}};
+qs('hint2').onclick=async()=>{msg('Finding a verified route…');try{let h=await hint(2);hints=Math.max(hints,h.hints_used??2);backtracksUsed=h.backtracks_used??backtracksUsed;freeBacks=h.free_backs??freeBacks;stats();msg('Hint 2 — Connecting actor: '+h.actor.name)}catch(e){await handleHintFailure(e)}};
 function shareSummary(result){
   const outcome=result.solved?result.degrees+' / 6 degrees • '+result.points+' points':'Target not reached • '+result.degrees+' / 6 degrees';
   const mode=result.hints_enabled===false?'No hints':result.hints_used+' hint level'+(result.hints_used===1?'':'s')+' used';
@@ -376,6 +376,7 @@ async function finishRound(solved,gaveUp=false,recoveredResult=null){
   let rd;
   try{rd=recoveredResult||await get('/api/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({puzzle_id:puzzleId,gave_up:gaveUp})})}
   catch(e){qs('retryResult').classList.remove('hidden');throw Error(e.message+' Your result is pending. Select Retry result.')}
+  hints=rd.hints_used??hints;backtracksUsed=rd.backtracks_used??backtracksUsed;freeBacks=rd.free_backs??freeBacks;stats();
   pendingFinish=null;roundFinished=true;for(const id of ['connect','back','hint1','hint2','giveUp','retrySync','retryResult','movieInput','actorInput'])qs(id).disabled=true;qs('retryResult').classList.add('hidden');
   resultShareText=shareSummary(rd);
   qs('shareStatus').textContent='';qs('shareFallback').classList.add('hidden');
@@ -426,7 +427,7 @@ async function begin(level){
     qs('levelClapper').classList.add('clap-once');
     if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches)await new Promise(resolve=>setTimeout(resolve,240));
     difficulty=puzzle.difficulty||level;challengeBenchmark=puzzle.challenge_benchmark||null;
-    roundFinished=false;routeRevision=puzzle.route_revision??0;roundSyncRequired=false;qs('retrySync').classList.add('hidden');puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;route=[{actor:current,movie:null}];
+    roundFinished=false;routeRevision=puzzle.route_revision??0;roundSyncRequired=false;qs('retrySync').classList.add('hidden');puzzleId=puzzle.puzzle_id;start=puzzle.start;target=puzzle.target;current={id:start.id,name:start.name,profile_path:start.profile_path};degree=0;hints=0;seconds=0;freeBacks=1;backtracksUsed=0;route=[{actor:current,movie:null}];
     for(const id of ['connect','back','giveUp'])qs(id).disabled=false;qs('movieInput').disabled=false;
     rememberRound(puzzleId);
     qs('startName').textContent=start.name;qs('targetName').textContent=target.name;setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);applyHintMode(puzzle.hints_enabled!==false);
@@ -452,7 +453,7 @@ async function applyRoundSnapshot(d){
     roundFinished=false;routeRevision=d.route_revision??0;puzzleId=d.puzzle_id;start=d.start;target=d.target;current=d.current_actor;difficulty=d.difficulty;
     activeChallengeToken=d.challenge_token||null;challengeBenchmark=d.challenge_benchmark||null;
     qs('noHints').checked=d.hints_enabled===false;qs('noHints').disabled=!!activeChallengeToken;
-    degree=d.degrees;hints=d.hints_used;freeBacks=d.free_backs;seconds=Math.floor(d.elapsed_seconds);
+    degree=d.degrees;hints=d.hints_used;freeBacks=d.free_backs;backtracksUsed=d.backtracks_used??0;seconds=Math.floor(d.elapsed_seconds);
     route=[{actor:start,movie:null},...(d.live_route||[])];
     qs('startName').textContent=start.name;qs('targetName').textContent=target.name;
     setActorImage('startPic',start.profile_path);setActorImage('targetPic',target.profile_path);
@@ -543,7 +544,7 @@ qs('newGame').onclick=()=>{
   if(!roundFinished||pendingFinish)return;
   clearInterval(timer);rememberRound(null);
   activeChallengeToken=null;challengeBenchmark=null;roundFinished=false;roundSyncRequired=false;
-  puzzleId=null;routeRevision=0;degree=0;hints=0;seconds=0;freeBacks=1;route=[];selectedMovie=selectedActor=null;
+  puzzleId=null;routeRevision=0;degree=0;hints=0;seconds=0;freeBacks=1;backtracksUsed=0;route=[];selectedMovie=selectedActor=null;
   resultShareText='';closeDrop('movie',true);closeDrop('actor',true);msg('');
   qs('noHints').disabled=false;qs('shareFallback').classList.add('hidden');qs('shareStatus').textContent='';
   qs('retryResume').classList.add('hidden');qs('retryStart').classList.add('hidden');qs('difficultyOptions').classList.remove('hidden');
