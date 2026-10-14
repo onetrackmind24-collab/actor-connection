@@ -88,10 +88,10 @@ def save_active_puzzles():
     try:
         with STATE_WRITE_LOCK:
             tmp=ACTIVE_PUZZLES_FILE.with_suffix('.tmp')
-            tmp.write_text(json.dumps(PUZZLES,separators=(',',':')))
+            tmp.write_text(json.dumps(dict(PUZZLES),separators=(',',':')))
             tmp.replace(ACTIVE_PUZZLES_FILE)
-    except Exception:
-        pass
+    except Exception as error:
+        raise RuntimeError('Your progress could not be saved. Please retry in a moment.') from error
 
 # Active rounds survive a server restart during the six-hour puzzle window.
 PUZZLES.update(load_active_puzzles())
@@ -1284,10 +1284,12 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-13-difficulty-names-expiry-v42','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-14-confirmed-round-save-v43','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
+                # Recovery must retry any failed write before acknowledging progress.
+                save_active_puzzles()
                 if puzzle.get('finished'):
                     result=puzzle.get('final_result')
                     if result is None: return self.send_json({'error':'Round already finished'},409)
@@ -1503,6 +1505,8 @@ class Handler(SimpleHTTPRequestHandler):
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('final_result') is not None:
+                    # A prior result response may have failed while saving active state.
+                    save_active_puzzles()
                     return self.send_json(puzzle['final_result'] | {'target_hidden':not TARGET_PREVIEWS_ENABLED})
                 # Final scoring consumes only the server-owned route. Client-submitted route
                 # data is intentionally ignored so browser state cannot manufacture a solve.

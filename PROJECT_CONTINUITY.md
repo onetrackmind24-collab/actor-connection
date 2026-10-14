@@ -386,3 +386,14 @@ User selected Casual / Film Buff / Cinephile to replace Beginner / Intermediate 
 Reproduced stuck-result bug: an expired round's Give Up or Retry result left pendingFinish locked forever with no way to choose a new game. Confirmed Puzzle expired or unknown from result now clears only the expired saved round, pending-result/sync locks and old challenge settings, hides retry buttons and returns to the normal chooser. Temporary network/server errors still retain progress and Retry result. Common expiry handling is reused for interrupted action recovery. Regression first failed on retained pendingFinish; covers direct result expiry, expiry after an interrupted result, and starting a fresh round afterward.
 
 Version41 live checks completed: Ryan Gosling to Tom Hanks solved100 after Hint2 then Hint1, two backtracks (first free, second5), saved recovery, no hinted-film Deep Cut rewards and consistent retried final result. Browser Jennifer Lawrence round retained hint2 and zero free backs after a free backtrack/reload.
+
+
+### Version42 live verification completed
+
+Renamed chooser rendered Casual, Film Buff, Cinephile. Film Buff started a normal Don Cheadle-to-Tom Hanks round with the Film Buff badge, preserving intermediate backend identity. All28 backend tests and frontend regressions passed, including direct expired result and interrupted-then-expired result returning to a usable chooser.
+
+## October14 — confirmed saved progress (v43)
+
+Reproduced persistence error: save_active_puzzles suppressed atomic-write failures, acknowledging moves/results as successful even when they existed only in process memory. Save failures now propagate a clear retry message without exposing filesystem details. Atomic writing snapshots the top-level round map before encoding. In-memory accepted revisions/results are retained so interrupted requests can recover without duplicate moves, hint penalties or results. /api/round retries writing before acknowledging saved progress; cached /api/result retries also persist the accepted cached result before returning success. While writing remains unavailable, recovery/result retry returns an error and the existing frontend guards preserve the pending state. Once storage recovers, saved snapshots survive process reload and the same result/challenge is returned. This improves acknowledgement and retry behavior; it cannot recover an unsaved in-memory action if the process dies during a storage outage.
+
+New fault-injection tests first failed because both move and result returned200 during failed atomic replacements. Tests cover old file preservation, recovery remaining blocked while writes fail, recovered accepted move revision without duplicate replay, failed/cached result retry, one database row, and stable finished result after reloading active state. All difficulty names, scoring, privacy, eligibility, weekly rotation and challenge rules remain unchanged.

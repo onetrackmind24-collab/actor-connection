@@ -103,6 +103,50 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(self.round, before)
         self.assertEqual(self.game.load_active_puzzles()[self.pid], before)
 
+    def test_failed_round_write_is_not_acknowledged_and_recovery_retries_save(self):
+        game=self.game
+        original=game.ACTIVE_PUZZLES_FILE.read_bytes()
+        replace=Path.replace
+        def fail_active(path,target):
+            if path==game.ACTIVE_PUZZLES_FILE.with_suffix('.tmp'):
+                raise OSError('private filesystem detail')
+            return replace(path,target)
+        with patch.object(Path,'replace',autospec=True,side_effect=fail_active):
+            status,error=self.move()
+            self.assertEqual(status,500)
+            self.assertNotIn('private filesystem detail',error['error'])
+            self.assertEqual(self.round['route_revision'],1)
+            self.assertEqual(game.ACTIVE_PUZZLES_FILE.read_bytes(),original)
+            self.assertEqual(self.request('/api/round?puzzle_id='+self.pid)[0],500)
+        status,recovered=self.request('/api/round?puzzle_id='+self.pid)
+        self.assertEqual(status,200)
+        self.assertEqual(recovered['degrees'],1)
+        self.assertEqual(recovered['route_revision'],1)
+        self.assertEqual(len(game.load_active_puzzles()[self.pid]['live_route']),1)
+        # Recover the accepted move; do not duplicate it with the old revision.
+        self.assertEqual(self.move(revision=0)[0],409)
+
+    def test_result_retry_requires_durable_cached_result_after_write_failure(self):
+        game=self.game
+        replace=Path.replace
+        def fail_active(path,target):
+            if path==game.ACTIVE_PUZZLES_FILE.with_suffix('.tmp'):
+                raise OSError('temporary write failure')
+            return replace(path,target)
+        with patch.object(Path,'replace',autospec=True,side_effect=fail_active):
+            self.assertEqual(self.request('/api/result',{'gave_up':True})[0],500)
+            result=copy.deepcopy(self.round['final_result'])
+            self.assertEqual(self.request('/api/result',{'gave_up':True})[0],500)
+            self.assertEqual(self.request('/api/round?puzzle_id='+self.pid)[0],500)
+        status,retried=self.request('/api/result',{'gave_up':True})
+        self.assertEqual(status,200)
+        self.assertEqual(retried,result)
+        game.PUZZLES.clear();game.PUZZLES.update(game.load_active_puzzles())
+        recovered=self.request('/api/round?puzzle_id='+self.pid)[1]
+        self.assertEqual(recovered['final_result'],result)
+        with sqlite3.connect(game.RESULTS_DB) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM game_results WHERE puzzle_id=?',(self.pid,)).fetchone()[0],1)
+
     def test_result_database_failure_is_retryable_and_finished_round_survives_reload(self):
         with patch.object(self.game, 'save_game_result', side_effect=OSError('database unavailable')):
             self.assertEqual(self.request('/api/result', {'gave_up': True})[0], 500)
