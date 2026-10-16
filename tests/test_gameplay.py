@@ -101,6 +101,18 @@ class GameplayTests(unittest.TestCase):
         self.assertEqual(status,200);self.assertFalse(result['solved']);self.assertEqual(result['degrees'],6)
         self.assertEqual(result['points'],0)
 
+    def test_about_and_logo_are_public_but_project_files_remain_private(self):
+        for path,expected in [('/about.html',b'This website uses TMDB'),('/assets/tmdb-logo.svg',b'<svg')]:
+            with urllib.request.urlopen(self.base+path,timeout=5) as response:
+                self.assertEqual(response.status,200)
+                self.assertIn(expected,response.read())
+            with urllib.request.urlopen(urllib.request.Request(self.base+path,method='HEAD'),timeout=5) as response:
+                self.assertEqual(response.status,200)
+        for path in ['/server.py','/LAUNCH_READINESS.md','/PROJECT_CONTINUITY.md','/assets/../server.py']:
+            with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(self.base+path,timeout=5)
+            self.assertEqual(error.exception.code,404)
+
     def test_stale_backtrack_does_not_consume_another_back(self):
         self.assertEqual(self.move()[0], 200)
         self.assertEqual(self.move(actor=self.round['start']['id'])[0], 200)
