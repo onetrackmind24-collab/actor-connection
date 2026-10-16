@@ -418,6 +418,28 @@ async function run() {
     assert.equal(vm.runInContext('selectedActor',f.context),null);
     assert.equal(f.nodes.actorDrop.classList.contains('hidden'),true);
   }
+  // A delayed hint on an already-complete route recovers and retries only the result.
+  for(const solved of [true,false]){
+    const f=fixture();let resultCalls=0,hintCalls=0;
+    const end={...snapshot(solved?1:6,7),current_actor:{id:solved?9:2,name:solved?'Target':'Next'}};
+    end.live_route=Array.from({length:end.degrees},(_,i)=>({movie:{id:i+1,title:'Film'},actor:i===end.degrees-1?end.current_actor:{id:3,name:'Other'}}));
+    const final={solved,degrees:end.degrees,cut:3,points:solved?150:0,hints_used:0,backtracks_used:0,free_backs:1,comparison_route:[],comparison_degrees:1,challenge_token:'result'};
+    f.context.fetch=async url=>{
+      if(url.startsWith('/api/hint?')){hintCalls++;return {ok:false,status:409,json:async()=>({error:'Round is complete. Recover your result.',round_changed:true})}}
+      if(url.startsWith('/api/round?'))return response(end);
+      assert.equal(url,'/api/result');resultCalls++;
+      return resultCalls===1?{ok:false,status:503,json:async()=>({error:'Temporary save failure'})}:response(final);
+    };
+    await f.nodes.hint1.onclick();
+    assert.equal(hintCalls,1);assert.equal(resultCalls,1);
+    assert.equal(f.nodes.connect.disabled,true);assert.equal(f.nodes.retryResult.disabled,false);
+    assert.equal(vm.runInContext('pendingFinish.solved',f.context),solved);
+    assert.equal(vm.runInContext('degree',f.context),end.degrees);
+    await f.nodes.retryResult.onclick();
+    assert.equal(resultCalls,2);assert.equal(hintCalls,1);
+    assert.equal(vm.runInContext('roundFinished',f.context),true);
+    assert.equal(f.nodes.retryResult.classList.contains('hidden'),true);
+  }
   // A result that definitively expires must release Retry result and challenge mode.
   for(const interrupted of [false,true]){
     const f=fixture();f.context.confirm=()=>true;

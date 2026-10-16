@@ -1242,6 +1242,12 @@ def bounded_hint_path(current, target, depth, seconds=8, puzzle=None):
     finally:
         SEARCH_CONTEXT.deadline=previous
 
+def round_completion_error(puzzle):
+    if (puzzle.get('finished') or len(puzzle.get('live_route') or [])>=6
+            or str(puzzle['current_actor']['id'])==str(puzzle['target']['id'])):
+        return ({'error':'Round is complete. Recover your result.','round_changed':True},409)
+    return None
+
 def route_revision_error(puzzle,body):
     if 'route_revision' not in body: return None
     expected=body['route_revision']
@@ -1284,7 +1290,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-14-confirmed-round-save-v43','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-16-completed-route-lock-v44','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
@@ -1309,6 +1315,8 @@ class Handler(SimpleHTTPRequestHandler):
                 pid=q.get('puzzle_id',[''])[0]; term=q.get('q',[''])[0].strip().lower()
                 cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
+                completion_error=round_completion_error(puzzle)
+                if completion_error: return self.send_json(*completion_error)
                 if not term: return self.send_json([])
                 current=str(puzzle['current_actor']['id'])
                 hits=[m for m in movies(current) if _title_key(term) in _title_key(m.get('title','')) and eligibility_for(m.get('id'),dict(m,id=current))['eligible']]
@@ -1317,6 +1325,8 @@ class Handler(SimpleHTTPRequestHandler):
                 pid=q.get('puzzle_id',[''])[0]; mid=q.get('movie_id',[''])[0]; term=q.get('q',[''])[0].strip().lower()
                 cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
+                completion_error=round_completion_error(puzzle)
+                if completion_error: return self.send_json(*completion_error)
                 if not term or not mid: return self.send_json([])
                 current=str(puzzle['current_actor']['id'])
                 # Autocomplete and move validation deliberately share the exact same
@@ -1372,6 +1382,8 @@ class Handler(SimpleHTTPRequestHandler):
                     revision_error=route_revision_error(puzzle,{'route_revision':expected})
                     if revision_error: return self.send_json(*revision_error)
                 if not puzzle.get('hints_enabled',True): return self.send_json({'error':'Hints are disabled for this round'},403)
+                completion_error=round_completion_error(puzzle)
+                if completion_error: return self.send_json(*completion_error)
                 depth=max(0,6-len(puzzle.get('live_route') or []))
                 if depth==0 or puzzle.get('finished'): return self.send_json({'error':'No moves remaining'},409)
                 a=str(puzzle['current_actor']['id'])
@@ -1439,6 +1451,8 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json({'valid': validate_connection(current,mid,nxt) is not None})
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
+                completion_error=round_completion_error(puzzle)
+                if completion_error: return self.send_json(*completion_error)
                 revision_error=route_revision_error(puzzle,body)
                 if revision_error: return self.send_json(*revision_error)
                 current=str(puzzle['current_actor']['id']); nxt=str(body.get('next_actor_id','')); mid=str(body.get('movie_id',''))
@@ -1486,6 +1500,8 @@ class Handler(SimpleHTTPRequestHandler):
                 pid=str(body.get('puzzle_id','')); cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)
                 if puzzle.get('finished'): return self.send_json({'error':'Round already finished'},409)
+                completion_error=round_completion_error(puzzle)
+                if completion_error: return self.send_json(*completion_error)
                 revision_error=route_revision_error(puzzle,body)
                 if revision_error: return self.send_json(*revision_error)
                 if not puzzle['live_route']: return self.send_json({'error':'Already at starting actor'},409)

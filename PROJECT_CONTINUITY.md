@@ -400,3 +400,14 @@ New fault-injection tests first failed because both move and result returned200 
 
 
 All30 backend tests and the frontend suite passed before v43 deployment. Initial main update remained v42 on live status after repeated rollout checks. Added an application-version meta tag to the page to verify frontend/server release agreement and retrigger the normal deployment with a frontend file change. The marker is metadata only; it adds no implementation details to player screens. Update this marker alongside the server build identifier in future releases. Do not report v43 live until both versions are verified.
+
+
+### Version43 live verification completed October15
+
+After the user's manual Render deploy, both server status and frontend application-version matched v43. All27 target/difficulty startup checks passed. A fresh Film Buff John C. Reilly-to-Tom Hanks solve105 passed backtracking, saved recovery, final-result retry, finished mutation rejection and frozen challenge actor/hint/benchmark preservation. The original Nicholson/Gedde invitation remained intact across the deployment. Auto-deployment did not pick up the v43 commits earlier; do not assume later commits are live without verification.
+
+## October16 — freeze completed routes before saving results (v44)
+
+Reproduced a server-side gap after reaching the target or using the sixth connection but before /api/result succeeds: a delayed request or copied tab could backtrack/change that already-complete route. The existing browser immediately finishes at these boundaries; the backend now enforces the same lifecycle. Moves, backtracks, hints and connection autocomplete reject completed routes with409 and round_changed, without changing the route/revision/hints/backtracks/offers. /api/round and /api/result remain available so progress and pending results can recover, including after restart. No-hints requests still retain their existing403 policy.
+
+Tests first failed on accepted backtracks and changed completed routes. New backend tests cover real demo solves, six unsolved alternating moves, unchanged state/file during rejected actions, restart preservation, and result success/retry. Frontend tests cover the completion409 recovery path for wins and six-move losses, a temporary result-save failure, locked gameplay and result-only retry. All32 backend tests and the frontend suite passed. No change to difficulty labels, six-move rules, scoring, eligibility, weekly rotation, target privacy or existing challenge modes. Frontend/server release markers updated together.

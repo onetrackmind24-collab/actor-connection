@@ -59,6 +59,48 @@ class GameplayTests(unittest.TestCase):
             'next_actor_id': actor or self.first['actor']['id'],
         })
 
+    def assert_terminal_route_locked(self):
+        before=copy.deepcopy(self.round)
+        saved=self.game.ACTIVE_PUZZLES_FILE.read_bytes()
+        last=self.round['live_route'][-1]
+        previous=self.round['live_route'][-2]['actor'] if len(self.round['live_route'])>1 else self.round['start']
+        actions=[('/api/backtrack',{'route_revision':self.round['route_revision']}),
+                 ('/api/move',{'route_revision':self.round['route_revision'],'movie_id':last['movie']['id'],'next_actor_id':previous['id']}),
+                 ('/api/hint?'+urllib.parse.urlencode({'puzzle_id':self.pid,'level':2,'route_revision':self.round['route_revision']}),None),
+                 ('/api/autocomplete/movies?'+urllib.parse.urlencode({'puzzle_id':self.pid,'q':'a'}),None),
+                 ('/api/autocomplete/actors?'+urllib.parse.urlencode({'puzzle_id':self.pid,'q':'a','movie_id':last['movie']['id']}),None)]
+        for path,body in actions:
+            with self.subTest(path=path):
+                status,error=self.request(path,body)
+                self.assertEqual(status,409)
+                self.assertTrue(error['round_changed'])
+                self.assertEqual(self.round,before)
+                self.assertEqual(self.game.ACTIVE_PUZZLES_FILE.read_bytes(),saved)
+
+    def test_reaching_target_locks_route_before_result_and_survives_reload(self):
+        for step in copy.deepcopy(self.round['comparison_route']):
+            status,move=self.request('/api/move',{'route_revision':self.round.get('route_revision',0),'movie_id':step['movie']['id'],'next_actor_id':step['actor']['id']})
+            self.assertEqual(status,200)
+        self.assertTrue(move['solved'])
+        self.assertFalse(self.round.get('finished'))
+        self.assert_terminal_route_locked()
+        self.game.PUZZLES.clear();self.game.PUZZLES.update(self.game.load_active_puzzles())
+        self.round=self.game.PUZZLES[self.pid]
+        self.assert_terminal_route_locked()
+        self.assertEqual(self.request('/api/round?puzzle_id='+self.pid)[1]['current_actor']['id'],self.round['target']['id'])
+        status,result=self.request('/api/result',{})
+        self.assertEqual(status,200);self.assertTrue(result['solved'])
+        self.assertEqual(self.request('/api/result',{})[1],result)
+
+    def test_sixth_unsolved_move_locks_route_before_result(self):
+        self.assertNotEqual(self.first['actor']['id'],self.round['target']['id'])
+        for index in range(6):
+            self.assertEqual(self.move(actor=self.first['actor']['id'] if index%2==0 else self.round['start']['id'])[0],200)
+        self.assert_terminal_route_locked()
+        status,result=self.request('/api/result',{})
+        self.assertEqual(status,200);self.assertFalse(result['solved']);self.assertEqual(result['degrees'],6)
+        self.assertEqual(result['points'],0)
+
     def test_stale_backtrack_does_not_consume_another_back(self):
         self.assertEqual(self.move()[0], 200)
         self.assertEqual(self.move(actor=self.round['start']['id'])[0], 200)
