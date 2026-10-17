@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="application-version" content="2026-10-16-about-credits-v45">
+<meta name="application-version" content="2026-10-17-expired-challenge-recovery-v46">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Make the Cut</title>
 <style>
@@ -526,11 +526,18 @@ async function loadChallenge(token){
   qs('acceptChallenge').disabled=true;qs('resumeExisting').classList.add('hidden');qs('challengeNote').textContent='';
   activeChallengeToken=token;
   try{
-    const c=await get('/api/challenge?token='+encodeURIComponent(token));
+    let c=null;
+    try{c=await get('/api/challenge?token='+encodeURIComponent(token))}
+    catch(e){
+      if(activeChallengeToken!==token)return;
+      qs('challengeTitle').textContent='Challenge unavailable';qs('challengeDetails').textContent=e.message;
+    }
     if(activeChallengeToken!==token)return;
-    qs('challengeTitle').textContent=c.start.name+' → '+(c.target_hidden?'Hidden target':c.target.name);
-    qs('challengeDetails').textContent=(c.benchmark?(c.benchmark.solved?'Score to beat: '+c.benchmark.points+'.':'Your friend did not reach the target. Finish to win.'):'Custom actor challenge. Reach the target in six connections or fewer.')+' '+difficultyName(c.difficulty)+' • '+(c.hints_enabled?'Hints allowed':'No hints')+'. Link valid for seven days.';
-    if(c.scoring_version===1)qs('challengeDetails').textContent+=' This older challenge keeps its original scoring; the six-connection hint penalty does not apply.';
+    if(c){
+      qs('challengeTitle').textContent=c.start.name+' → '+(c.target_hidden?'Hidden target':c.target.name);
+      qs('challengeDetails').textContent=(c.benchmark?(c.benchmark.solved?'Score to beat: '+c.benchmark.points+'.':'Your friend did not reach the target. Finish to win.'):'Custom actor challenge. Reach the target in six connections or fewer.')+' '+difficultyName(c.difficulty)+' • '+(c.hints_enabled?'Hints allowed':'No hints')+'. Link valid for seven days.';
+      if(c.scoring_version===1)qs('challengeDetails').textContent+=' This older challenge keeps its original scoring; the six-connection hint penalty does not apply.';
+    }
     const saved=rememberedRound();
     if(saved){
       qs('challengeNote').textContent='Checking your saved round…';
@@ -538,10 +545,11 @@ async function loadChallenge(token){
       try{round=await get('/api/round?puzzle_id='+encodeURIComponent(saved))}catch(_){lookupFailed=true}
       if(activeChallengeToken!==token)return;
       if(round?.challenge_token===token){qs('challengeInvite').classList.add('hidden');await resumeRound(saved);return}
-      qs('challengeNote').textContent=lookupFailed?'Could not check your saved round. Resume it to retry, or accept this challenge to start a new round.':'You have a saved round. Resume it, or start this challenge instead.';
+      qs('challengeNote').textContent=c?(lookupFailed?'Could not check your saved round. Resume it to retry, or accept this challenge to start a new round.':'You have a saved round. Resume it, or start this challenge instead.'):'Your saved round is kept. Select Resume My Round to try restoring it.';
       qs('resumeExisting').classList.remove('hidden');
       qs('resumeExisting').onclick=()=>{if(activeChallengeToken!==token)return;qs('challengeInvite').classList.add('hidden');return resumeRound(saved)};
     }
+    if(!c)return;
     qs('acceptChallenge').onclick=()=>{
       if(qs('acceptChallenge').disabled||activeChallengeToken!==token)return;
       qs('noHints').checked=!c.hints_enabled;qs('noHints').disabled=true;qs('challengeInvite').classList.add('hidden');qs('loading').classList.remove('hidden');return begin(c.difficulty);

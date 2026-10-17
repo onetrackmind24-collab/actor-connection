@@ -610,6 +610,43 @@ class GameplayTests(unittest.TestCase):
         self.assertNotIn('challenge_outcome',result)
         self.assertIsNotNone(game.challenge_preview(result['challenge_token'])['benchmark'])
 
+    def test_invitation_expiry_blocks_new_attempts_but_preserves_started_round(self):
+        game=self.game
+        created=game.create_custom_challenge(self.round['start']['name'],self.round['target']['name'])
+        token=created['token']
+        accepted=game.start_challenge(token)
+        self.pid=accepted['puzzle_id'];self.round=game.PUZZLES[self.pid]
+        self.first=self.round['comparison_route'][0]
+        self.assertEqual(self.move()[0],200)
+        before=copy.deepcopy(self.round)
+        # Expire the invitation and simulate its removal on process restart.
+        game.CHALLENGES[token]['expires']=game.time.time()-1
+        game.CHALLENGES_FILE.write_text(json.dumps(game.CHALLENGES))
+        game.CHALLENGES=game.load_challenges()
+        self.assertNotIn(token,game.CHALLENGES)
+        for path in ('/api/challenge?token=','/api/puzzle?challenge='):
+            self.assertEqual(self.request(path+token)[0],404)
+        game.PUZZLES=game.load_active_puzzles()
+        self.round=game.PUZZLES[self.pid]
+        self.assertEqual(self.round,before)
+        status,saved=self.request('/api/round?puzzle_id='+self.pid)
+        self.assertEqual(status,200)
+        self.assertEqual(saved['challenge_token'],token)
+        self.assertEqual(saved['degrees'],1)
+        for step in self.round['comparison_route'][1:]:
+            self.first=step
+            self.assertEqual(self.move()[0],200)
+        status,result=self.request('/api/result',{})
+        self.assertEqual(status,200)
+        self.assertTrue(result['solved'])
+        game.PUZZLES=game.load_active_puzzles()
+        status,finished=self.request('/api/round?puzzle_id='+self.pid)
+        self.assertEqual(status,200)
+        self.assertEqual(finished['final_result']['points'],result['points'])
+        # The round still expires at its own six-hour boundary.
+        game.PUZZLES[self.pid]['created']=game.time.time()-game.PUZZLE_TTL-1
+        self.assertEqual(self.request('/api/round?puzzle_id='+self.pid)[0],404)
+
     def test_custom_challenge_rejects_invalid_names_mode_and_unverified_route(self):
         game=self.game;before=copy.deepcopy(game.CHALLENGES)
         names={'start_name':self.round['start']['name'],'target_name':self.round['target']['name']}

@@ -155,10 +155,35 @@ async function run() {
       assert.equal(f.nodes.currentName.textContent,'Next');
     }
   }
+  // Invitation expiry/outage must not strand an existing six-hour round.
+  for(const status of [404,503])for(const lookup of ['same','different','offline','none']){
+    const f=fixture();f.context.sessionStorage.getItem=()=>lookup==='none'?null:'saved';
+    f.context.fetch=async url=>{
+      if(url.startsWith('/api/challenge?'))return {ok:false,status,json:async()=>({error:status===404?'Challenge expired or unknown':'Temporary outage'})};
+      assert.equal(url,'/api/round?puzzle_id=saved');
+      if(lookup==='offline')throw Error('Offline');
+      return response({...snapshot(1,4),challenge_token:lookup==='same'?'invite':'other'});
+    };
+    await f.context.loadChallenge('invite');
+    assert.equal(f.nodes.acceptChallenge.disabled,true);
+    assert.notEqual(f.context.savedRoundCleared,true);
+    if(lookup==='same'){
+      assert.equal(f.nodes.currentName.textContent,'Next');
+      assert.equal(f.nodes.challengeInvite.classList.contains('hidden'),true);
+    }else{
+      assert.equal(f.nodes.challengeTitle.textContent,'Challenge unavailable');
+      assert.equal(f.nodes.resumeExisting.classList.contains('hidden'),lookup==='none');
+      if(lookup!=='none'){
+        f.context.fetch=async()=>response({...snapshot(1,4),challenge_token:'other'});
+        await f.nodes.resumeExisting.onclick();
+        assert.equal(f.nodes.currentName.textContent,'Next');
+      }
+    }
+  }
   // Leaving an invitation while its saved-round check is pending must cancel auto-resume.
-  {
+  for(const unavailable of [false,true]){
     const f=fixture();f.context.sessionStorage.getItem=()=> 'saved';let release;
-    f.context.fetch=async url=>url.startsWith('/api/challenge?')?response({start:{name:'Start'},target:{name:'Target'},difficulty:'custom',hints_enabled:true}):new Promise(resolve=>release=resolve);
+    f.context.fetch=async url=>url.startsWith('/api/challenge?')?(unavailable?{ok:false,status:404,json:async()=>({error:'Challenge expired or unknown'})}:response({start:{name:'Start'},target:{name:'Target'},difficulty:'custom',hints_enabled:true})):new Promise(resolve=>release=resolve);
     const opening=f.context.loadChallenge('invite');await new Promise(resolve=>setImmediate(resolve));
     f.nodes.normalGame.onclick();release(response({...snapshot(1,3),challenge_token:'invite'}));await opening;
     assert.equal(vm.runInContext('activeChallengeToken',f.context),null);

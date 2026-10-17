@@ -1,10 +1,10 @@
-# Browser launch readiness — October 16, 2026
+# Browser launch readiness — October 17, 2026
 
 Planning targets: public beta October 19; full browser launch October 26. These are estimates, not commitments. A licensing delay or critical beta defect moves the dates. Native app launch is outside this browser release.
 
 ## Evidence
 
-Version44 is live. Local32 backend tests and frontend recovery suite passed. Live John Turturro-to-Tom Hanks solve105 confirmed terminal route rejection before result submission, unchanged route/penalties, successful result, stable result retries and finished recovery. All27 target/difficulty combinations passed startup verification. These checks are not full device or concurrency/load testing.
+Version45 was verified live. Version46 adds expired-invitation saved-round recovery; local34 backend tests and frontend recovery suite passed. Deployment verification pending. Live John Turturro-to-Tom Hanks solve105 confirmed terminal route rejection before result submission, unchanged route/penalties, successful result, stable result retries and finished recovery. All27 target/difficulty combinations passed startup verification. These checks are not full device or concurrency/load testing.
 
 ## Release gates
 
