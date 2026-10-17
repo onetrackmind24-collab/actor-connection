@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="application-version" content="2026-10-17-expired-challenge-recovery-v46">
+<meta name="application-version" content="2026-10-17-resumed-round-links-v47">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Make the Cut</title>
 <style>
@@ -455,6 +455,9 @@ stats();
 async function applyRoundSnapshot(d){
     roundFinished=false;routeRevision=d.route_revision??0;puzzleId=d.puzzle_id;start=d.start;target=d.target;current=d.current_actor;difficulty=d.difficulty;
     activeChallengeToken=d.challenge_token||null;challengeBenchmark=d.challenge_benchmark||null;
+    const url=new URL(location.href);
+    if(activeChallengeToken)url.searchParams.set('challenge',activeChallengeToken);else url.searchParams.delete('challenge');
+    history.replaceState(null,'',url.pathname+url.search+url.hash);
     qs('noHints').checked=d.hints_enabled===false;qs('noHints').disabled=!!activeChallengeToken;
     degree=d.degrees;hints=d.hints_used;freeBacks=d.free_backs;backtracksUsed=d.backtracks_used??0;seconds=Math.floor(d.elapsed_seconds);
     route=[{actor:start,movie:null},...(d.live_route||[])];

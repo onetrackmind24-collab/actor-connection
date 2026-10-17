@@ -158,6 +158,7 @@ async function run() {
   // Invitation expiry/outage must not strand an existing six-hour round.
   for(const status of [404,503])for(const lookup of ['same','different','offline','none']){
     const f=fixture();f.context.sessionStorage.getItem=()=>lookup==='none'?null:'saved';
+    f.context.location.href='https://actor-connection.onrender.com/?challenge=invite&keep=yes#game';
     f.context.fetch=async url=>{
       if(url.startsWith('/api/challenge?'))return {ok:false,status,json:async()=>({error:status===404?'Challenge expired or unknown':'Temporary outage'})};
       assert.equal(url,'/api/round?puzzle_id=saved');
@@ -170,13 +171,16 @@ async function run() {
     if(lookup==='same'){
       assert.equal(f.nodes.currentName.textContent,'Next');
       assert.equal(f.nodes.challengeInvite.classList.contains('hidden'),true);
+      assert.equal(f.context.updatedUrl,'/?challenge=invite&keep=yes#game');
     }else{
       assert.equal(f.nodes.challengeTitle.textContent,'Challenge unavailable');
       assert.equal(f.nodes.resumeExisting.classList.contains('hidden'),lookup==='none');
       if(lookup!=='none'){
-        f.context.fetch=async()=>response({...snapshot(1,4),challenge_token:'other'});
+        const restoredToken=lookup==='different'?'other':null;
+        f.context.fetch=async()=>response({...snapshot(1,4),challenge_token:restoredToken});
         await f.nodes.resumeExisting.onclick();
         assert.equal(f.nodes.currentName.textContent,'Next');
+        assert.equal(f.context.updatedUrl,restoredToken?'/?challenge=other&keep=yes#game':'/?keep=yes#game');
       }
     }
   }

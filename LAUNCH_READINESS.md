@@ -4,7 +4,7 @@ Planning targets: public beta October 19; full browser launch October 26. These 
 
 ## Evidence
 
-Version45 was verified live. Version46 adds expired-invitation saved-round recovery; local34 backend tests and frontend recovery suite passed. Deployment verification pending. Live John Turturro-to-Tom Hanks solve105 confirmed terminal route rejection before result submission, unchanged route/penalties, successful result, stable result retries and finished recovery. All27 target/difficulty combinations passed startup verification. These checks are not full device or concurrency/load testing.
+Version46 was verified live, including saved route/hints recovery from an unavailable invitation. Version47 synchronizes the restored round’s address so refresh opens the correct game. Local34 backend tests and frontend recovery suite passed; final v47 rollout check remains. Live John Turturro-to-Tom Hanks solve105 confirmed terminal route rejection before result submission, unchanged route/penalties, successful result, stable result retries and finished recovery. All27 target/difficulty combinations passed startup verification. These checks are not full device or concurrency/load testing.
 
 ## Release gates
 
