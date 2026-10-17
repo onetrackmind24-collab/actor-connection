@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="application-version" content="2026-10-17-directional-hint-validation-v48">
+<meta name="application-version" content="2026-10-17-new-game-weekly-preview-v49">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Make the Cut</title>
 <style>
@@ -233,6 +233,7 @@ async function actorSearch(mid,q){return get('/api/autocomplete/actors?puzzle_id
 let weeklyRequest=0;
 async function refreshWeeklyFeature(){
   const request=++weeklyRequest;
+  for(const id of ['weeklyFeature','weeklyLevel']){qs(id).textContent='';qs(id).classList.add('hidden')}
   try{
     const status=await get('/api/status'),schedule=status.weekly_schedule;
     if(request!==weeklyRequest)return;
@@ -562,6 +563,7 @@ async function loadChallenge(token){
 }
 qs('newGame').onclick=()=>{
   if(!roundFinished||pendingFinish)return;
+  refreshWeeklyFeature();
   clearInterval(timer);rememberRound(null);
   activeChallengeToken=null;challengeBenchmark=null;roundFinished=false;roundSyncRequired=false;
   puzzleId=null;routeRevision=0;degree=0;hints=0;seconds=0;freeBacks=1;backtracksUsed=0;route=[];selectedMovie=selectedActor=null;

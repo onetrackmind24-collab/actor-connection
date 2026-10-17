@@ -4,7 +4,7 @@ Planning targets: public beta October 19; full browser launch October 26. These 
 
 ## Evidence
 
-Version47 was verified live: saved route/hints survived deployment and unavailable-invitation recovery, the restored address matched the round, and refresh resumed directly. Version48 validates reverse hint connections independently and bounds cold credit revalidation. Local36 backend tests and frontend recovery suite passed; live v48 verification follows deployment. Live John Turturro-to-Tom Hanks solve105 confirmed terminal route rejection before result submission, unchanged route/penalties, successful result, stable result retries and finished recovery. All27 target/difficulty combinations passed startup verification. These checks are not full device or concurrency/load testing.
+Version47 was verified live: saved route/hints survived deployment and unavailable-invitation recovery, the restored address matched the round, and refresh resumed directly. Version48 validates reverse hint connections independently and bounds cold credit revalidation. Local36 backend tests and frontend recovery suite passed; v48 live detour/negative-score/result recovery/challenge checks also passed. v49 refreshes the weekly preview when requesting a fresh game. Live John Turturro-to-Tom Hanks solve105 confirmed terminal route rejection before result submission, unchanged route/penalties, successful result, stable result retries and finished recovery. All27 target/difficulty combinations passed startup verification. These checks are not full device or concurrency/load testing.
 
 ## Release gates
 
@@ -22,3 +22,8 @@ Separate About & Credits page, reachable from the game footer and scoring guide.
 
 Logo source: https://www.themoviedb.org/assets/v4/logos/v2/blue_short-8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c.svg
 Guidance: https://developer.themoviedb.org/docs/faq and https://www.themoviedb.org/about/logos-attribution .
+
+
+## Human testing reported October17 evening
+
+User reports responsive moves, backtrack without errors, and new starting actors on fresh-game requests. Device/browser and the remaining matrix were not specified; this is encouraging feedback, not a full mobile/Safari signoff.

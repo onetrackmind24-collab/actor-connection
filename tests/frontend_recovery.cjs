@@ -495,6 +495,31 @@ async function run() {
     await f.context.begin('beginner');assert.equal(f.nodes.connect.disabled,false);
     assert.equal(f.nodes.difficultyBadge.textContent,'Casual');
   }
+  // A new round must refresh the weekly preview without carrying old gameplay state.
+  for(const nextWeek of ['Morgan Freeman','launch','offline']){
+    const f=fixture();let resolvePreview;
+    f.nodes.weeklyLevel.textContent='This week’s target: Tom Hanks.';
+    f.nodes.weeklyFeature.textContent=f.nodes.weeklyLevel.textContent;
+    vm.runInContext("roundFinished=true;degree=4;hints=2;backtracksUsed=3;freeBacks=2;routeRevision=7;activeChallengeToken='old';challengeBenchmark={points:50}",f.context);
+    f.context.fetch=async url=>{
+      assert.equal(url,'/api/status');
+      return new Promise(resolve=>resolvePreview=resolve);
+    };
+    f.nodes.newGame.onclick();
+    assert.equal(typeof resolvePreview,'function');
+    assert.equal(f.nodes.weeklyLevel.textContent,'');
+    assert.equal(f.nodes.weeklyLevel.classList.contains('hidden'),true);
+    for(const expression of ['degree','hints','backtracksUsed','routeRevision','route.length'])assert.equal(vm.runInContext(expression,f.context),0);
+    assert.equal(vm.runInContext('freeBacks',f.context),1);
+    assert.equal(vm.runInContext('activeChallengeToken',f.context),null);
+    assert.equal(vm.runInContext('challengeBenchmark',f.context),null);
+    assert.equal(f.nodes.loading.classList.contains('hidden'),false);
+    resolvePreview(nextWeek==='offline'?{ok:false,status:503,json:async()=>({error:'Temporary outage'})}:response({weekly_schedule:nextWeek==='launch'?null:{name:nextWeek,rotation_enabled:false}}));
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(f.nodes.weeklyLevel.textContent,nextWeek==='Morgan Freeman'?'This week’s target: Morgan Freeman.':'');
+    assert.equal(f.nodes.weeklyLevel.classList.contains('hidden'),nextWeek!=='Morgan Freeman');
+    assert.equal(vm.runInContext('target.name',f.context),'Target');
+  }
   // Completed rounds lock controls and New Game leaves challenge mode without reload.
   {
     const f=fixture();f.context.location.href='https://actor-connection.onrender.com/?challenge=old&keep=yes#game';

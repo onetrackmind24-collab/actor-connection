@@ -447,3 +447,16 @@ Reproduced a hint validity bug with asymmetric provider records: an accepted act
 Known-route search now builds candidate directions and validates each explored edge using the canonical connection check before enqueuing it. Missing or ineligible reverse credits are skipped; valid forward/reverse connections remain available. This also avoids eagerly validating unrelated graph branches. The revalidation has a four-second budget capped by any enclosing search budget; provider timeout/unavailability returns unknown so wider hint search can try, rather than letting a cold lookup block a move for the normal provider timeout. Thread-local deadlines are restored after either outcome. No unsupported route is represented as proven impossible.
 
 Regression first failed with a200 invalid hint. New coverage verifies valid reverse paths, missing actor filmography, cameo-labeled actor credit, unchanged hint penalty/disclosures when no valid fallback exists, recovery when provider credits become valid, bounded provider failure and restored outer search budgets. All36 backend tests and frontend suite passed. Scoring, eligibility rules, difficulties, weekly rotation, challenge privacy and instructions unchanged. Frontend/server markers updated together. Live v48 deployment check remains to be completed after this checkpoint.
+
+
+### Version48 live verification completed
+
+Both frontend/server markers matched v48, with all27 rotation checks passed. Live test intentionally detoured Jennifer Lawrence → American Hustle → Bradley Cooper, then accepted the reverse hint to Jennifer Lawrence and subsequent hinted connections to Tom Hanks within six moves. Result was−20, hint penalty20 and Deep Cut0. Lower-level repeat hints retained usage2; final result retry, finished recovery and challenge benchmark all matched.
+
+## October17 evening — human testing and fresh-game weekly preview (v49)
+
+User reports gameplay is responsive, backtracking worked without errors, and fresh games provide new starting actors. Preserve these as user-reported checks; device/browser and full test-matrix completion were not specified.
+
+Code review found New Game reset gameplay state but did not refresh the weekly preview, allowing a round spanning Monday midnight to leave the old target on the next difficulty screen even though the backend generates the new week's target. New Game now refreshes the weekly preview. Refresh clears the old preview immediately; unavailable/launch-mode schedules remain hidden instead of displaying a stale target. The existing request-order guard remains in place, and schedule fetches do not block starting or restoring a game. Current rounds and challenge targets remain frozen.
+
+Frontend regression first failed because New Game issued no schedule request. Tests cover the Tom Hanks-to-Morgan Freeman transition, hidden launch preview, schedule outage, immediate usable chooser, and clearing route/hints/backtracks/revision/challenge benchmark while preserving the previous actor pair until a new game starts. Frontend suite passed. Server functionality unchanged apart from build marker. Focused backend rotation checks run before release; full backend suite last passed36 tests in v48. Both release markers updated together. Live v49 verification follows deployment.
