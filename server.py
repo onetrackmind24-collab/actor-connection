@@ -1131,6 +1131,19 @@ def route_allowed_by_overrides(start_id, route):
     return True
 
 def known_finish_route(puzzle, current, max_depth):
+    # Revalidation may need a cold actor-credit lookup. Keep it within the
+    # caller's remaining budget and leave wider hint search available on failure.
+    previous=getattr(SEARCH_CONTEXT,'deadline',None)
+    limit=time.monotonic()+4
+    SEARCH_CONTEXT.deadline=min(previous,limit) if previous is not None else limit
+    try:
+        return _known_finish_route(puzzle,current,max_depth)
+    except (TimeoutError,OSError):
+        return None
+    finally:
+        SEARCH_CONTEXT.deadline=previous
+
+def _known_finish_route(puzzle, current, max_depth):
     """Search only already accepted edges and the verified comparison route.
 
     Reverse played edges let an off-route player return toward a verified finish.
@@ -1141,9 +1154,6 @@ def known_finish_route(puzzle, current, max_depth):
         previous=puzzle['start']
         for step in route:
             actor=step['actor']
-            if not route_allowed_by_overrides(previous['id'],[step]):
-                previous=actor
-                continue
             graph.setdefault(str(previous['id']),[]).append((str(actor['id']),step))
             reverse={'movie':step['movie'],'actor':previous}
             graph.setdefault(str(actor['id']),[]).append((str(previous['id']),reverse))
@@ -1156,7 +1166,10 @@ def known_finish_route(puzzle, current, max_depth):
         if actor==target: return path
         if len(path)>=max_depth: continue
         for neighbor,step in graph.get(actor,[]):
-            if neighbor not in seen:
+            # Credits can differ by direction: appearing in a film's cast does
+            # not establish that actor's own eligible movie-credit record.
+            # Validate only explored edges, including reverse played edges.
+            if neighbor not in seen and route_allowed_by_overrides(actor,[step]):
                 seen.add(neighbor); queue.append((neighbor,path+[step]))
     return None
 
@@ -1290,7 +1303,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-17-resumed-round-links-v47','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-17-directional-hint-validation-v48','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)

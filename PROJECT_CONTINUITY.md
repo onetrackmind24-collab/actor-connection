@@ -434,3 +434,16 @@ Backend regression verifies an attempt started before expiry survives invitation
 ### Live v46 verification and resumed-round address correction (v47)
 
 Both live markers matched v46; rotation audit passed. Chrome live test saved Jennifer Lawrence → American Hustle → Christian Bale with two hint levels, opened an intentionally unavailable invitation (404), received Resume My Round with Accept disabled, and restored the same accepted route/hints. This revealed the old invitation remained in the address bar when restoring an unrelated round. Snapshot application now synchronizes the challenge query to the restored round's token, removing it for regular rounds and preserving unrelated query parameters/hash. This prevents reload from reopening the wrong invitation. Regression first failed on the stale address and now passes for same challenge, other challenge and regular-round recovery. Frontend suite passed after correction; backend behavior unchanged from the34 passing tests. Updated both release markers to v47. Final deployment/UI refresh verification pending at this checkpoint.
+
+
+### Version47 live verification completed
+
+Both release markers matched v47. Chrome restored the saved Jennifer Lawrence → American Hustle → Christian Bale route with two hint levels after opening an unavailable invitation. The address changed back to the regular-game root, and a further refresh restored that round directly. Saved state survived the deployment. Proof: make-the-cut-round-recovery-1792255015109.jpg.
+
+## October17 — validate reverse hint connections in their played direction (v48)
+
+Reproduced a hint validity bug with asymmetric provider records: an accepted actor-A/movie/actor-B connection establishes A's eligible movie credit and both cast rows, but does not establish B's own eligible movie-credit record. known_finish_route previously validated the forward edge and inserted both directions without independently validating the reverse. An off-route hint could therefore return200 and charge Hint2 for a first connection that /api/move rejects.
+
+Known-route search now builds candidate directions and validates each explored edge using the canonical connection check before enqueuing it. Missing or ineligible reverse credits are skipped; valid forward/reverse connections remain available. This also avoids eagerly validating unrelated graph branches. The revalidation has a four-second budget capped by any enclosing search budget; provider timeout/unavailability returns unknown so wider hint search can try, rather than letting a cold lookup block a move for the normal provider timeout. Thread-local deadlines are restored after either outcome. No unsupported route is represented as proven impossible.
+
+Regression first failed with a200 invalid hint. New coverage verifies valid reverse paths, missing actor filmography, cameo-labeled actor credit, unchanged hint penalty/disclosures when no valid fallback exists, recovery when provider credits become valid, bounded provider failure and restored outer search budgets. All36 backend tests and frontend suite passed. Scoring, eligibility rules, difficulties, weekly rotation, challenge privacy and instructions unchanged. Frontend/server markers updated together. Live v48 deployment check remains to be completed after this checkpoint.

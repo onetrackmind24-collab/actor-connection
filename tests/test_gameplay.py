@@ -322,6 +322,54 @@ class GameplayTests(unittest.TestCase):
             self.assertIsNone(game.short_hint_path('current','target',2))
         self.assertIsNone(getattr(game.SEARCH_CONTEXT,'deadline',None))
 
+    def test_reverse_hint_edges_require_the_current_actors_eligible_movie_credit(self):
+        game=self.game
+        movie=self.first['movie'];mid=str(movie['id'])
+        detour={'id':'detour','name':'Detour performer','profile_path':None}
+        self.round.update(current_actor=detour,live_route=[{'movie':movie,'actor':detour}])
+        original_movies=game.movies;original_cast=game.cast
+        credits=[dict(movie)]
+        def films(aid):
+            return credits if str(aid)=='detour' else original_movies(aid)
+        def cast(mid_arg):
+            rows=original_cast(mid_arg)
+            return rows+[detour] if str(mid_arg)==mid else rows
+        with patch.object(game,'movies',side_effect=films),patch.object(game,'cast',side_effect=cast):
+            # The reverse connection works when both sides have eligible credits.
+            route=game.known_finish_route(self.round,'detour',5)
+            self.assertTrue(route)
+            self.assertLessEqual(len(route),5)
+            self.assertTrue(game.route_allowed_by_overrides('detour',route))
+            for invalid in ([],[dict(movie,character='Cameo')]):
+                credits[:]=invalid
+                # A forward accepted edge does not establish the reverse credit.
+                self.assertTrue(game.validate_connection(self.round['start']['id'],mid,'detour'))
+                self.assertIsNone(game.validate_connection('detour',mid,self.round['start']['id']))
+                with patch.object(game,'bounded_hint_path',return_value=None):
+                    status,error=self.request('/api/hint?'+urllib.parse.urlencode({'puzzle_id':self.pid,'level':2,'route_revision':0}))
+                self.assertEqual(status,404)
+                self.assertEqual(error['error'],'No verified hint route found')
+                self.assertEqual(self.round['hints_used'],0)
+                self.assertFalse(self.round.get('hinted_movie_ids'))
+                self.assertIsNone(game.known_finish_route(self.round,'detour',5))
+            # Provider recovery makes the valid direction available again.
+            credits[:]=[dict(movie)]
+            self.assertTrue(game.known_finish_route(self.round,'detour',5))
+
+    def test_known_route_provider_timeout_is_bounded_and_restores_search_budget(self):
+        game=self.game
+        for previous in (None,game.time.monotonic()+60):
+            game.SEARCH_CONTEXT.deadline=previous
+            def unavailable(*args):
+                deadline=game.SEARCH_CONTEXT.deadline
+                self.assertIsNotNone(deadline)
+                if previous is not None:self.assertLessEqual(deadline,previous)
+                raise TimeoutError('Slow provider')
+            with patch.object(game,'validate_connection',side_effect=unavailable):
+                self.assertIsNone(game.known_finish_route(self.round,self.round['start']['id'],6))
+            self.assertEqual(game.SEARCH_CONTEXT.deadline,previous)
+        game.SEARCH_CONTEXT.deadline=None
+
     def test_short_hint_timeout_keeps_time_for_known_route_fallback(self):
         game=self.game
         route=[self.first]
