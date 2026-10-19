@@ -1,10 +1,10 @@
-# Browser launch readiness — October 17, 2026
+# Browser launch readiness — October 19, 2026
 
 Planning targets: public beta October 19; full browser launch October 26. These are estimates, not commitments. A licensing delay or critical beta defect moves the dates. Native app launch is outside this browser release.
 
 ## Evidence
 
-Version47 was verified live: saved route/hints survived deployment and unavailable-invitation recovery, the restored address matched the round, and refresh resumed directly. Version48 validates reverse hint connections independently and bounds cold credit revalidation. Local36 backend tests and frontend recovery suite passed; v48 live detour/negative-score/result recovery/challenge checks also passed. v49 refreshes the weekly preview when requesting a fresh game. Live John Turturro-to-Tom Hanks solve105 confirmed terminal route rejection before result submission, unchanged route/penalties, successful result, stable result retries and finished recovery. All27 target/difficulty combinations passed startup verification. These checks are not full device or concurrency/load testing.
+Version47 was verified live: saved route/hints survived deployment and unavailable-invitation recovery, the restored address matched the round, and refresh resumed directly. Version48 validates reverse hint connections independently and bounds cold credit revalidation. Local45 backend/backup tests and frontend recovery suite passed; v48 live detour/negative-score/result recovery/challenge checks also passed. v49 refreshes the weekly preview when requesting a fresh game. Live John Turturro-to-Tom Hanks solve105 confirmed terminal route rejection before result submission, unchanged route/penalties, successful result, stable result retries and finished recovery. All27 target/difficulty combinations passed startup verification. These checks are not full device or concurrency/load testing.
 
 ## Release gates
 
@@ -27,3 +27,12 @@ Guidance: https://developer.themoviedb.org/docs/faq and https://www.themoviedb.o
 ## Human testing reported October17 evening
 
 User reports responsive moves, backtrack without errors, and new starting actors on fresh-game requests. Device/browser and the remaining matrix were not specified; this is encouraging feedback, not a full mobile/Safari signoff.
+
+
+## Recovery tooling (v50)
+
+Offline state export/verification and restore into a new directory are implemented in backup_state.py; operational procedure is in OPERATIONS.md. A local stopped-server drill booted the actual game from restored data and continued play with hints/backtrack/revision intact, plus restored invitation and finished result. Committed SQLite WAL results are included. This does not complete the production backup gate: an actual off-server production export, restore drill and scheduling/retention arrangements are still required. No production data was copied or restored by this implementation.
+
+## October19 checks
+
+Morgan Freeman rotated in at Monday midnight New York time, with Denzel Washington next October26. v49 was verified live with all27 startup combinations passed; user reported a further manual test without errors. Device/browser and remaining test-matrix coverage were not specified.

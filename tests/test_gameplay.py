@@ -1,5 +1,6 @@
 """Offline regression checks. Run: python -m unittest discover -s tests -v"""
 import copy
+import backup_state
 import datetime
 import importlib.util
 import json
@@ -108,10 +109,51 @@ class GameplayTests(unittest.TestCase):
                 self.assertIn(expected,response.read())
             with urllib.request.urlopen(urllib.request.Request(self.base+path,method='HEAD'),timeout=5) as response:
                 self.assertEqual(response.status,200)
-        for path in ['/server.py','/LAUNCH_READINESS.md','/PROJECT_CONTINUITY.md','/assets/../server.py']:
+        for path in ['/server.py','/backup_state.py','/OPERATIONS.md','/LAUNCH_READINESS.md','/PROJECT_CONTINUITY.md','/assets/../server.py']:
             with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(self.base+path,timeout=5)
             self.assertEqual(error.exception.code,404)
+
+    def test_backup_restores_playable_round_challenges_and_finished_results(self):
+        game=self.game
+        self.assertEqual(self.request('/api/hint?'+urllib.parse.urlencode({'puzzle_id':self.pid,'level':2,'route_revision':0}))[0],200)
+        self.assertEqual(self.move()[0],200)
+        self.assertEqual(self.request('/api/backtrack',{'route_revision':1})[0],200)
+        self.assertEqual(self.move()[0],200)
+        original_pid=self.pid
+        expected=copy.deepcopy(self.round)
+        custom=game.create_custom_challenge(self.round['start']['name'],self.round['target']['name'],False)
+        other=game.generate_puzzle('intermediate')
+        self.pid=other['puzzle_id']
+        status,finished=self.request('/api/result',{'gave_up':True})
+        self.assertEqual(status,200)
+        finished_pid=self.pid
+        self.pid=original_pid
+        # Exercise the documented stopped-server workflow, then boot from the restore.
+        self.http.shutdown();self.http.server_close();self.thread.join()
+        archive=Path(self.data.name)/'export.zip'
+        destination=Path(self.data.name)/'restored'
+        backup_state.create_backup(self.data.name,archive,server_stopped=True)
+        backup_state.restore_backup(archive,destination)
+        with patch.dict(os.environ,{'GAME_DATA_DIR':str(destination),'TMDB_API_TOKEN':'','WEEKLY_TARGET':'Matt Damon'}):
+            spec=importlib.util.spec_from_file_location('restored_game',Path(__file__).resolve().parents[1]/'server.py')
+            restored=importlib.util.module_from_spec(spec);spec.loader.exec_module(restored)
+        self.game=restored
+        restored.Handler.log_message=lambda *args:None
+        self.http=restored.ThreadingHTTPServer(('127.0.0.1',0),restored.Handler)
+        self.thread=threading.Thread(target=self.http.serve_forever,daemon=True);self.thread.start()
+        self.base=f'http://127.0.0.1:{self.http.server_port}'
+        self.round=restored.PUZZLES[self.pid]
+        self.assertEqual(self.round,expected)
+        status,snapshot=self.request('/api/round?puzzle_id='+self.pid)
+        self.assertEqual(status,200)
+        self.assertEqual((snapshot['degrees'],snapshot['hints_used'],snapshot['backtracks_used'],snapshot['route_revision']),(1,2,1,3))
+        status,preview=self.request('/api/challenge?token='+custom['token'])
+        self.assertEqual(status,200);self.assertFalse(preview['hints_enabled'])
+        status,recovered=self.request('/api/round?puzzle_id='+finished_pid)
+        self.assertEqual(status,200);self.assertEqual(recovered['final_result'],finished)
+        self.first=self.round['comparison_route'][1]
+        self.assertEqual(self.move()[0],200)
 
     def test_stale_backtrack_does_not_consume_another_back(self):
         self.assertEqual(self.move()[0], 200)
