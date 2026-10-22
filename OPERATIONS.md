@@ -40,6 +40,32 @@ arrangements still need to be completed and tested.
 
 ## Verify recovery before switching production
 
+### Render startup checkpoint
+
+For this single-instance Render service with its attached persistent disk, an
+operator can set `GAME_STARTUP_BACKUP_NAME=production-2026-10-22` and deploy.
+Render stops the old process before the replacement can mount the disk. Before
+the new process loads game state, initializes SQLite or accepts requests,
+`server.py` creates and verifies
+`/var/data/backups/production-2026-10-22.zip` (using `GAME_DATA_DIR` for the base
+directory and respecting `RESULTS_DB`). This must not be enabled where another
+process or service can still write the same data. Do not run a second server
+manually against the live directory.
+
+The setting is disabled by default and requires an existing data directory,
+active-round file and results database. A failure stops startup rather than
+silently claiming a backup. Archive files have mode 0600; the backup directory
+is created with mode 0700. The startup log prints only the checkpoint path,
+never its contents. Check for `Startup checkpoint verified:` in Render logs.
+
+A checkpoint name is immutable: subsequent starts validate the existing archive
+without replacing or refreshing it. Choose a new name for a later checkpoint,
+or clear the setting to disable the check. This is not a recurring backup or an
+off-server copy. Export the archive privately and perform the recovery drill
+below; keep original live data unchanged during the drill.
+
+### Restore procedure
+
 First restore into a **new, nonexistent directory**. Restoring over existing
 state is refused. The parent directory must already exist.
 

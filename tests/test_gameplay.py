@@ -1,6 +1,7 @@
 """Offline regression checks. Run: python -m unittest discover -s tests -v"""
 import copy
 import backup_state
+from startup_backup import backup_before_start
 import datetime
 import importlib.util
 import json
@@ -109,7 +110,7 @@ class GameplayTests(unittest.TestCase):
                 self.assertIn(expected,response.read())
             with urllib.request.urlopen(urllib.request.Request(self.base+path,method='HEAD'),timeout=5) as response:
                 self.assertEqual(response.status,200)
-        for path in ['/server.py','/backup_state.py','/OPERATIONS.md','/LAUNCH_READINESS.md','/PROJECT_CONTINUITY.md','/assets/../server.py']:
+        for path in ['/server.py','/backup_state.py','/startup_backup.py','/OPERATIONS.md','/LAUNCH_READINESS.md','/PROJECT_CONTINUITY.md','/assets/../server.py']:
             with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(self.base+path,timeout=5)
             self.assertEqual(error.exception.code,404)
@@ -131,9 +132,8 @@ class GameplayTests(unittest.TestCase):
         self.pid=original_pid
         # Exercise the documented stopped-server workflow, then boot from the restore.
         self.http.shutdown();self.http.server_close();self.thread.join()
-        archive=Path(self.data.name)/'export.zip'
+        archive=backup_before_start({'GAME_DATA_DIR':self.data.name,'GAME_STARTUP_BACKUP_NAME':'integration-recovery'})
         destination=Path(self.data.name)/'restored'
-        backup_state.create_backup(self.data.name,archive,server_stopped=True)
         backup_state.restore_backup(archive,destination)
         with patch.dict(os.environ,{'GAME_DATA_DIR':str(destination),'TMDB_API_TOKEN':'','WEEKLY_TARGET':'Matt Damon'}):
             spec=importlib.util.spec_from_file_location('restored_game',Path(__file__).resolve().parents[1]/'server.py')

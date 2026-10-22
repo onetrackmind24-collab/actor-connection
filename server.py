@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# Run before importing/loading game state, opening the database, or starting
+# background threads. The deployment must have stopped the previous instance.
+if __name__ == '__main__':
+    from startup_backup import backup_before_start
+    startup_checkpoint = backup_before_start()
+    if startup_checkpoint is not None:
+        print('Startup checkpoint verified:', startup_checkpoint, flush=True)
+
 import weakref
 from contextlib import nullcontext
 import re, json, os, time, urllib.parse, urllib.request, threading, secrets, datetime, sqlite3, statistics, unicodedata
@@ -1303,7 +1311,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-19-backup-recovery-tools-v50','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-22-startup-checkpoint-v51','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)

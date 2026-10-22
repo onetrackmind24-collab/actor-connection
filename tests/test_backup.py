@@ -1,11 +1,15 @@
 import json
 from pathlib import Path
 import sqlite3
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
 
 import backup_state as backup
+from startup_backup import backup_before_start
 
 
 class BackupTests(unittest.TestCase):
@@ -36,6 +40,52 @@ class BackupTests(unittest.TestCase):
 
     def create(self, **kwargs):
         return backup.create_backup(self.data, self.archive, server_stopped=True, **kwargs)
+
+    def test_startup_checkpoint_is_private_immutable_and_recoverable(self):
+        env = {'GAME_DATA_DIR': str(self.data), 'GAME_STARTUP_BACKUP_NAME': 'production-test'}
+        archive = backup_before_start(env)
+        original = archive.read_bytes()
+        (self.data / 'active_puzzles.json').write_text('{}')
+        self.assertEqual(backup_before_start(env).read_bytes(), original)
+        backup.restore_backup(archive, self.destination)
+        self.assertEqual(json.loads((self.destination / 'active_puzzles.json').read_text())['round']['hints_used'], 2)
+        self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(archive.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_startup_checkpoint_honors_external_results_database(self):
+        external = self.root / 'external.sqlite3'
+        self.db.close()
+        (self.data / backup.DATABASE).rename(external)
+        self.db = sqlite3.connect(external)
+        archive = backup_before_start({'GAME_DATA_DIR': str(self.data),
+            'GAME_STARTUP_BACKUP_NAME': 'external', 'RESULTS_DB': str(external)})
+        backup.restore_backup(archive, self.destination)
+        with sqlite3.connect(self.destination / backup.DATABASE) as db:
+            self.assertEqual(db.execute('SELECT points FROM game_results').fetchone(), (-20,))
+
+    def test_startup_checkpoint_rejects_unsafe_names_and_corrupt_existing_archive(self):
+        for name in ('../escape', '/tmp/escape', 'has space'):
+            with self.assertRaises(ValueError):
+                backup_before_start({'GAME_DATA_DIR': str(self.data), 'GAME_STARTUP_BACKUP_NAME': name})
+        env = {'GAME_DATA_DIR': str(self.data), 'GAME_STARTUP_BACKUP_NAME': 'test'}
+        archive = backup_before_start(env)
+        archive.write_bytes(b'corrupted')
+        with self.assertRaises(zipfile.BadZipFile):
+            backup_before_start(env)
+
+    def test_failed_checkpoint_exits_before_server_initializes_state(self):
+        empty = self.root / 'empty'
+        empty.mkdir()
+        env = dict(os.environ, GAME_DATA_DIR=str(empty), GAME_STARTUP_BACKUP_NAME='required')
+        env.pop('RESULTS_DB', None)
+        result = subprocess.run([sys.executable, 'server.py'], cwd=Path(__file__).resolve().parents[1],
+                                env=env, capture_output=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((empty / backup.DATABASE).exists())
+        self.assertFalse((empty / 'cache').exists())
+
+    def test_disabled_startup_checkpoint_does_not_touch_disk(self):
+        self.assertIsNone(backup_before_start({}))
 
     def test_round_trip_includes_committed_wal_results_and_preserves_state(self):
         self.assertTrue(Path(str(self.data / backup.DATABASE) + '-wal').exists())

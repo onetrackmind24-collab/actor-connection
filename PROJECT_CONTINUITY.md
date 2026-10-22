@@ -473,3 +473,22 @@ Added backup_state.py (stdlib only) and OPERATIONS.md. Create requires explicit 
 Integration drill stops a local test server, exports state, restores into a new directory, boots the actual game against it, checks an accepted move/Hint2/used back/route revision, a custom no-hints invitation and a finished result, then accepts a further move. First drill found missing optional eligibility state on a valid fresh installation; corrected to match server defaults. Tests cover committed WAL, malformed source JSON, invalid database, modified archive, unsafe path rejection and overwrite refusal. Full45 backend/backup tests and frontend suite passed. New source and operations docs remain outside the static allowlist. Both release markers updated together.
 
 Production has NOT been backed up by this work. Requires a stopped-process maintenance/export window on the production data volume, separate access-controlled off-server storage, a real recovery drill, and a scheduling/retention policy. A ZIP on the same persistent disk is not protection against losing that disk. Environment/deployment configuration and source/assets are outside this state archive; source/assets remain in GitHub. Launch stage, ads, scoring, actors and gameplay rules unchanged. Live v50 deployment verification follows this checkpoint.
+
+## October22 — optional startup checkpoint (v51)
+
+Render tools now work for confirmed My Workspace and actor-connection, with one
+instance and a 1 GB persistent disk at /var/data. Connector lacks Shell and file
+transfer. Browser handoff is unavailable to the user; stop repeating login
+instructions. User's own Render Web Shell works, confirmed backup_state.py help
+and python3 server.py process (PID40 at time of screenshot; never reuse stale PID).
+No live process was killed.
+
+Added GAME_STARTUP_BACKUP_NAME opt-in, called before server.py imports game state
+or initializes SQLite. On this single-instance disk deployment, Render stops the
+old process before starting the replacement. Helper creates and validates a
+private immutable named archive under GAME_DATA_DIR/backups, respects RESULTS_DB,
+and refuses startup on failure. Retrying the same name verifies the existing
+archive, without updating it. Disabled by default; never manually start a second
+server against live data. This is not recurring backup, off-server export or a
+completed production recovery drill. Production enablement and verification are
+pending at this pre-deployment checkpoint. Gameplay rules remain unchanged.

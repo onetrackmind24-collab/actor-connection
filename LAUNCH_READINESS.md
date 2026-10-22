@@ -35,4 +35,12 @@ Offline state export/verification and restore into a new directory are implement
 
 ## October19 checks
 
+## Startup checkpoint (v51, October22)
+
+An opt-in pre-initialization checkpoint supports the single-instance Render disk
+deployment without manually killing its server. See OPERATIONS.md. Production
+enablement and log verification are pending at this code checkpoint. Off-server
+export, a real production-data recovery drill and recurring retention remain
+required; implementing the startup hook does not complete those gates.
+
 Morgan Freeman rotated in at Monday midnight New York time, with Denzel Washington next October26. v49 was verified live with all27 startup combinations passed; user reported a further manual test without errors. Device/browser and remaining test-matrix coverage were not specified.
