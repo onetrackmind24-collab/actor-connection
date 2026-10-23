@@ -133,10 +133,43 @@ expose filenames, archive contents, round IDs, paths or credentials. Successful
 snapshots and failures also appear in service logs. No external alerting is
 configured. The worker retries failures without taking gameplay offline.
 
-These copies are on the same Render disk. Automatic off-server delivery is
-not configured; an approved private destination and its authentication are
-still required. Do not put backup data in the public GitHub repository or add
-a public download endpoint.
+These local copies are on the same Render disk. Off-server delivery requires
+R2 configuration as described below. Do not put backup data in the public GitHub
+repository or add a public download endpoint.
+
+## Private R2 delivery (v53)
+
+In the existing service's Dashboard Environment variables, add R2_BUCKET,
+R2_ENDPOINT (HTTPS S3 endpoint, without the bucket path), R2_ACCESS_KEY_ID and
+R2_SECRET_ACCESS_KEY. Keep the bucket private and scope the R2 token to Object
+Read & Write on this bucket only. Do not use an account-wide administrator key.
+Do not store credentials in GitHub, reports or screenshots. After saving with
+Save only, the next code deployment activates the values.
+
+The existing worker uploads the newest verified automatic archive on startup,
+then each new daily archive. HTTPS PUT is followed by authenticated GET and a
+full SHA256 comparison against the locally verified ZIP. Network work happens
+outside the snapshot gate. Keys under automatic/ include the archive hash and
+filename. Retrying or restarting uses the same object key; no public URL or
+bucket configuration is created. Restarts repeat upload/download verification.
+Only the newest archive is delivered; older local archives are not backfilled.
+The named October22 checkpoint remains on disk and in its existing Mac copy.
+
+No variables means not_configured. Partial or invalid configuration means
+invalid_config without stopping the game. Pending, failed, stale and verified
+states distinguish remote delivery from local snapshot health. Verification and
+failure timestamps are exposed without credentials, endpoint, bucket name,
+object paths or content. HTTP exception messages and response bodies are never
+logged. Failures retry after five minutes, do not delete local copies, and do
+not block requests. Requests have 20-second socket timeouts and archive/response
+sizes are capped at 64 MiB. This is not a hard total transfer deadline.
+
+No remote deletion or lifecycle configuration is performed. Remote archives
+accumulate until the owner configures retention; the seven-copy limit applies
+only locally. No external failure notification is configured. Recovery: use the
+private R2 Dashboard to download a ZIP, verify it with backup_state.py verify,
+then restore it into a new isolated directory following the recovery procedure.
+The application does not download into or overwrite live game state.
 
 ## Verification evidence
 

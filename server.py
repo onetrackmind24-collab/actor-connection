@@ -15,6 +15,7 @@ from pathlib import Path
 from collections import deque
 from zoneinfo import ZoneInfo
 from automatic_backups import SnapshotGate, AutomaticBackups
+from r2_backups import R2Backups
 
 ROOT=Path(__file__).resolve().parent
 # Keep all mutable state on an explicitly configured persistent volume.
@@ -77,6 +78,7 @@ RESULTS_LOCK=threading.Lock()
 RESULTS_DB.parent.mkdir(parents=True,exist_ok=True)
 BACKUP_GATE=SnapshotGate()
 AUTOMATIC_BACKUPS=AutomaticBackups(STATE_DIR,RESULTS_DB,BACKUP_GATE,
+    remote=R2Backups(),
     enabled=os.environ.get('GAME_AUTOMATIC_BACKUPS','1' if os.environ.get('GAME_DATA_DIR') else '0').strip().lower() in {'1','true','yes'})
 # Seed curated data only once; never overwrite persisted user/game state.
 for state_name in ('eligibility_overrides.json','used_starters.json'):
@@ -1317,7 +1319,7 @@ class Handler(SimpleHTTPRequestHandler):
     def handle_get(self):
         u=urllib.parse.urlparse(self.path); q=urllib.parse.parse_qs(u.query)
         try:
-            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-23-automatic-local-backups-v52','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats(),'backup':AUTOMATIC_BACKUPS.status()})
+            if u.path=='/api/status': return self.send_json({'ready':True,'build':'2026-10-23-private-r2-backups-v53','mode':'demo' if DEMO_MODE else 'live','cache_entries':len(list(CACHE_DIR.glob('*.json'))),'release_stage':'beta' if TARGET_PREVIEWS_ENABLED else 'launch','weekly_target':weekly_target()['name'] if TARGET_PREVIEWS_ENABLED else None,'weekly_schedule':weekly_target() if TARGET_PREVIEWS_ENABLED else None,'rotation_verification':rotation_audit_status() if TARGET_PREVIEWS_ENABLED else {'status':rotation_audit_status()['status']},'eligibility_overrides':sum(len(v) for v in ELIGIBILITY_OVERRIDES.values()),'storage':{'data_directory_configured':bool(os.environ.get('GAME_DATA_DIR')),'results_in_data_directory':RESULTS_DB.resolve().is_relative_to(STATE_DIR)},'results':result_stats(),'backup':AUTOMATIC_BACKUPS.status()})
             if u.path=='/api/round':
                 pid=q.get('puzzle_id',[''])[0]; cleanup_puzzles(); puzzle=PUZZLES.get(pid)
                 if not puzzle: return self.send_json({'error':'Puzzle expired or unknown'},404)

@@ -68,13 +68,14 @@ class SnapshotGate:
 
 class AutomaticBackups:
     def __init__(self, data_dir, results_db, gate, *, enabled=False,
-                 interval_seconds=86400, keep=7):
+                 interval_seconds=86400, keep=7, remote=None):
         self.data_dir = Path(data_dir)
         self.results_db = Path(results_db)
         self.gate = gate
         self.enabled = enabled
         self.interval_seconds = interval_seconds
         self.keep = keep
+        self.remote = remote
         self.lock = threading.Lock()
         self.cycle_lock = threading.Lock()
         self.stop = threading.Event()
@@ -118,7 +119,8 @@ class AutomaticBackups:
                     'retention_warning': self.retention_warning,
                     'local_copies_kept': self.keep,
                     'interval_seconds': self.interval_seconds,
-                    'off_server_status': 'not_configured'}
+                    **(self.remote.status(self.interval_seconds) if self.remote else
+                       {'off_server_status': 'not_configured'})}
 
     def maybe_backup(self):
         if not self.enabled or not self.cycle_lock.acquire(blocking=False):
@@ -188,6 +190,8 @@ class AutomaticBackups:
         def run():
             while not self.stop.is_set():
                 self.maybe_backup()
+                if self.remote is not None:
+                    self.remote.upload_latest(self)
                 self.stop.wait(60)
         worker = threading.Thread(target=run, name='automatic-local-backups', daemon=True)
         worker.start()

@@ -528,3 +528,23 @@ not a false server-stopped assertion. No public data download route added.
 Automatic off-server storage/authentication, external alerts and deployment
 configuration recovery remain open. Production deployment verification follows
 this source checkpoint; gameplay rules, beta visibility and ad status unchanged.
+
+
+## October23 — private R2 delivery (v53)
+
+The user created make-the-cut-backups with Standard storage and public access
+disabled, created a bucket-scoped Object Read & Write token, and reported saving
+the four R2 environment variables directly in Render. No credentials were
+shared in chat. v53 wires R2Backups into the existing daily worker: latest
+verified automatic ZIP, HTTPS signed PUT then GET/full SHA256 comparison,
+network outside snapshot gate, safe separate status, five-minute failure
+retry, deterministic keys, no remote deletion. Local backup retention and
+all gameplay/scoring/rotation rules remain unchanged. Remote retention and
+external alerts are still not configured. Real production delivery must be
+verified after deployment; code tests alone do not establish R2 connectivity.
+
+Validation before deployment: full backend/backup suite70 passed; three additional
+R2 tests then passed (12 R2 tests total), including AWS published GET/PUT signing
+vectors, bounded downloads and worker startup delivery. Frontend recovery/search/
+keyboard/completed locks/fresh replay suite passed. Baseline production status
+v52:64 results,46 solved, rotation passed, local backup verified.

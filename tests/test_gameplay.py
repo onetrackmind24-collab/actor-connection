@@ -111,7 +111,7 @@ class GameplayTests(unittest.TestCase):
                 self.assertIn(expected,response.read())
             with urllib.request.urlopen(urllib.request.Request(self.base+path,method='HEAD'),timeout=5) as response:
                 self.assertEqual(response.status,200)
-        for path in ['/server.py','/backup_state.py','/startup_backup.py','/automatic_backups.py','/backups/production-2026-10-22.zip','/OPERATIONS.md','/LAUNCH_READINESS.md','/PROJECT_CONTINUITY.md','/assets/../server.py']:
+        for path in ['/server.py','/backup_state.py','/startup_backup.py','/automatic_backups.py','/r2_backups.py','/backups/production-2026-10-22.zip','/OPERATIONS.md','/LAUNCH_READINESS.md','/PROJECT_CONTINUITY.md','/assets/../server.py']:
             with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(self.base+path,timeout=5)
             self.assertEqual(error.exception.code,404)
