@@ -36,7 +36,8 @@ Copy the verified archive to a separate, access-controlled location off the
 Render instance and its persistent disk. A copy on `/var/data` alone does not
 protect against losing that disk. This tool does not configure off-server
 storage, scheduling, retention or provider-volume snapshots. Those production
-arrangements still need to be completed and tested.
+arrangements still need to be completed and tested. The runtime worker below
+automates local snapshots only.
 
 ## Verify recovery before switching production
 
@@ -90,6 +91,53 @@ Original creation/expiry timestamps are preserved: active rounds still last six
 hours and invitations seven days. Recovery does not extend their lifetimes.
 Provider cache rebuilds can make initial requests slower after recovery.
 
+## Automatic local backups (v52)
+
+When `GAME_DATA_DIR` is configured, automatic local backups are enabled by
+default. Set `GAME_AUTOMATIC_BACKUPS=0` to disable them. This supports the
+existing single-process, single-instance deployment only. Do not add external
+writers or start another game process against the same data directory.
+
+The running server checks once per minute and creates a snapshot when no
+verified automatic copy exists or the last copy is at least 24 hours old.
+Restarts discover and verify the latest automatic archive, so they do not reset
+the schedule or create unnecessary duplicates. A missing required state file
+causes a reported failure and later retry, not silent omission.
+
+HTTP state operations share a request gate and remain concurrent between
+backups. The backup asks for exclusive access, waits for in-flight state
+operations to finish, and briefly holds incoming state operations while copying
+and verifying JSON plus SQLite state. If it cannot obtain exclusive access
+within two seconds, it releases waiting requests and retries on the next check.
+The two-second limit covers acquiring access, not the backup's total duration.
+Status and static requests do not mutate game state and remain available.
+The weekly verification worker uses dry-run generation and does not write
+backed-up state. Provider cache writes are outside the backup set.
+
+Runtime snapshots call the internal backup API with an explicit
+`writes_quiesced` confirmation while holding that gate. The manifest records
+`server_stopped_confirmed=false`, `writes_quiesced_confirmed=true` and
+`kind=automatic-local`. The manual CLI still requires a stopped process.
+
+Archives use private files in `GAME_DATA_DIR/backups/automatic-*.zip`.
+After a new snapshot is fully verified, retention keeps the seven newest
+verified automatic archives. Named checkpoints such as
+`production-2026-10-22.zip`, unknown files, corrupt archives and symbolic links
+are never pruned. Retention failures are reported; a failed new backup does
+not delete old copies. Seven copies do not guarantee seven calendar days
+if the server is stopped, busy or storage is failing.
+
+The public `/api/status` exposes only local status, timestamps, interval,
+retention count and whether off-server delivery is configured. It does not
+expose filenames, archive contents, round IDs, paths or credentials. Successful
+snapshots and failures also appear in service logs. No external alerting is
+configured. The worker retries failures without taking gameplay offline.
+
+These copies are on the same Render disk. Automatic off-server delivery is
+not configured; an approved private destination and its authentication are
+still required. Do not put backup data in the public GitHub repository or add
+a public download endpoint.
+
 ## Verification evidence
 
 Automated tests boot the actual game from a restored archive and verify an
@@ -97,5 +145,16 @@ accepted move, Hint2 usage, a used backtrack, the route revision, custom challen
 settings, a finished result, and a further accepted move. Additional tests cover
 committed SQLite WAL data, invalid JSON/database, changed archive bytes, unsafe
 archive paths and refusal to replace existing data. These local tests establish
-the tool's behavior; a production off-server export and recovery drill remain
-release gates.
+the tool's behavior.
+
+October 22–23: a real production archive was created and verified, privately
+downloaded off Render, uploaded for verification and restored into isolated
+directories. All 64 original database rows matched, all five historical round
+records and four cached final results were checked, and invitation previews
+preserved their original settings. All five rounds were already expired at
+checkpoint time; historical test clocks verified their content without
+changing expiry timestamps. A separate current-clock check retained expiry
+behavior. A new local demo-provider round passed hints, a backtrack, solve,
+save and reload while leaving the 64 original rows unchanged. This was an
+isolated recovery drill, not a production traffic cutover or live provider
+revalidation. The user retains a Mac copy of the archive.

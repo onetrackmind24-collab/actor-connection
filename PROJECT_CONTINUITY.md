@@ -492,3 +492,39 @@ archive, without updating it. Disabled by default; never manually start a second
 server against live data. This is not recurring backup, off-server export or a
 completed production recovery drill. Production enablement and verification are
 pending at this pre-deployment checkpoint. Gameplay rules remain unchanged.
+
+## October23 — recovery verified; daily local backup worker (v52)
+
+v51 commit 631f45bde807043a0cb1e34b160bdbd71c538a47 is live. Render startup log
+confirmed /var/data/backups/production-2026-10-22.zip at October22 11:39 a.m.
+New York time. User restored to a separate Render directory, verified bytes,
+and loaded 64 results. Mac lacked Homebrew and usable Python; avoid repeated
+install/login instructions. Transfer succeeded using Render wormhole with
+Winden's documented mailbox/transit servers and a browser receiver. The user
+retains the ZIP on their Mac and uploaded it on October23 for verification.
+Do not publish the archive or its invitation/round capabilities.
+
+The uploaded 18,684-byte archive passed all member checksums, JSON and SQLite
+checks. All 64 original result rows matched restored copies. Five archived
+rounds were already expired at backup time; each was separately loaded at its
+historical creation time to check state through the round API, including four
+cached final results and the one used backtrack. All 14 invitations unexpired
+at backup time (out of 23 archived) had preserved preview settings. A separate
+current-clock check retained expiry. A new demo-provider round on disposable
+restored data passed Hint2, move, backtrack, solve, save and reload; its 65th
+test result did not change the original 64 rows. No live-provider replay or
+production traffic failover was performed. Verification report saved separately.
+
+v52 adds AutomaticBackups and a shared/exclusive request gate. Default enabled
+when GAME_DATA_DIR is explicit, disabled with GAME_AUTOMATIC_BACKUPS=0. Snapshot
+every 24 hours with one-minute checks/retries; waits up to two seconds to drain
+in-flight state requests, then copies and verifies before releasing new state
+requests. Ordinary requests remain concurrent; status/static reads bypass the
+gate. Only the seven newest verified automatic archives are retained. Named
+October22 checkpoint, unknown/corrupt files and symlinks are preserved. Failed
+new snapshots do not prune old ones. Reports safe local health and explicit
+off-server-not-configured status. It uses the internal writes_quiesced flag,
+not a false server-stopped assertion. No public data download route added.
+Automatic off-server storage/authentication, external alerts and deployment
+configuration recovery remain open. Production deployment verification follows
+this source checkpoint; gameplay rules, beta visibility and ad status unchanged.

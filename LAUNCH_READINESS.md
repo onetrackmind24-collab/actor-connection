@@ -1,4 +1,4 @@
-# Browser launch readiness — October 19, 2026
+# Browser launch readiness — October 23, 2026
 
 Planning targets: public beta October 19; full browser launch October 26. These are estimates, not commitments. A licensing delay or critical beta defect moves the dates. Native app launch is outside this browser release.
 
@@ -35,6 +35,8 @@ Offline state export/verification and restore into a new directory are implement
 
 ## October19 checks
 
+Morgan Freeman rotated in at Monday midnight New York time, with Denzel Washington next October26. v49 was verified live with all27 startup combinations passed; user reported a further manual test without errors. Device/browser and remaining test-matrix coverage were not specified.
+
 ## Startup checkpoint (v51, October22)
 
 An opt-in pre-initialization checkpoint supports the single-instance Render disk
@@ -43,4 +45,19 @@ enablement and log verification are pending at this code checkpoint. Off-server
 export, a real production-data recovery drill and recurring retention remain
 required; implementing the startup hook does not complete those gates.
 
-Morgan Freeman rotated in at Monday midnight New York time, with Denzel Washington next October26. v49 was verified live with all27 startup combinations passed; user reported a further manual test without errors. Device/browser and remaining test-matrix coverage were not specified.
+## Production recovery verified October23; automatic local backups (v52)
+
+The October22 production checkpoint was verified in Render logs, exported to
+the user's Mac, uploaded and independently validated. Restore checks preserved
+all 64 result rows, five historical rounds and original challenge settings.
+Expired records stayed expired; historical clocks were used only in isolated
+tests. A new demo-provider round passed hints, backtrack, solve, save and reload
+against restored data. No production failover or live-provider replay was done.
+
+v52 adds daily local snapshots, exclusive access during snapshots while keeping
+normal requests concurrent, seven-copy automatic retention and safe backup
+health status. Production enablement/log checks are pending at this source
+checkpoint. Automatic off-server delivery, external failure alerts and recovery
+of deployment configuration remain open. Local snapshots do not replace
+off-server protection. Licensing, device testing and ad integration gates
+above remain unchanged.

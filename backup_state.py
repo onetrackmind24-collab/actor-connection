@@ -63,8 +63,11 @@ def read_backup(archive):
     return payload
 
 
-def create_backup(data_dir, output, *, server_stopped=False, results_db=None):
-    if not server_stopped:
+def create_backup(data_dir, output, *, server_stopped=False, results_db=None,
+                  writes_quiesced=False, kind='manual'):
+    # The runtime scheduler supplies writes_quiesced only while holding the
+    # exclusive request gate. The CLI still requires a stopped server.
+    if not server_stopped and not writes_quiesced:
         raise ValueError('Stop the game server and pass --server-stopped before creating a backup')
     data_dir, output = Path(data_dir).resolve(), Path(output).resolve()
     if output.exists():
@@ -97,7 +100,9 @@ def create_backup(data_dir, output, *, server_stopped=False, results_db=None):
         manifest = {
             'format_version': 1,
             'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            'server_stopped_confirmed': True,
+            'server_stopped_confirmed': bool(server_stopped),
+            'writes_quiesced_confirmed': bool(writes_quiesced),
+            'kind': kind,
             'absent_state_files': absent,
             'files': {name: {'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
                       for name, data in sorted(payload.items())},

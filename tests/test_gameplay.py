@@ -2,6 +2,7 @@
 import copy
 import backup_state
 from startup_backup import backup_before_start
+from automatic_backups import AutomaticBackups
 import datetime
 import importlib.util
 import json
@@ -110,15 +111,53 @@ class GameplayTests(unittest.TestCase):
                 self.assertIn(expected,response.read())
             with urllib.request.urlopen(urllib.request.Request(self.base+path,method='HEAD'),timeout=5) as response:
                 self.assertEqual(response.status,200)
-        for path in ['/server.py','/backup_state.py','/startup_backup.py','/OPERATIONS.md','/LAUNCH_READINESS.md','/PROJECT_CONTINUITY.md','/assets/../server.py']:
+        for path in ['/server.py','/backup_state.py','/startup_backup.py','/automatic_backups.py','/backups/production-2026-10-22.zip','/OPERATIONS.md','/LAUNCH_READINESS.md','/PROJECT_CONTINUITY.md','/assets/../server.py']:
             with self.subTest(path=path), self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(self.base+path,timeout=5)
             self.assertEqual(error.exception.code,404)
+
+    def test_automatic_backup_waits_for_result_database_and_round_to_commit(self):
+        game=self.game
+        entered=threading.Event();release=threading.Event();snapshot_started=threading.Event()
+        original_save=game.save_game_result
+        original_backup=backup_state.create_backup
+        result=[];archives=[]
+        manager=AutomaticBackups(game.STATE_DIR,game.RESULTS_DB,game.BACKUP_GATE,enabled=True)
+        def save(*args,**kwargs):
+            original_save(*args,**kwargs)
+            entered.set()
+            if not release.wait(3):raise TimeoutError('test release')
+        def backup(*args,**kwargs):
+            snapshot_started.set()
+            return original_backup(*args,**kwargs)
+        request=threading.Thread(target=lambda:result.append(self.request('/api/result',{'gave_up':True})))
+        snapshot=threading.Thread(target=lambda:archives.append(manager.maybe_backup()))
+        with patch.object(game,'save_game_result',side_effect=save), patch('automatic_backups.create_backup',side_effect=backup):
+            request.start()
+            try:
+                self.assertTrue(entered.wait(1))
+                snapshot.start()
+                self.assertFalse(snapshot_started.wait(.05))
+            finally:
+                release.set();request.join(3)
+                if snapshot.ident is not None:snapshot.join(3)
+        self.assertEqual(result[0][0],200)
+        self.assertIsNotNone(archives[0])
+        payload=backup_state.read_backup(archives[0])
+        restored_round=json.loads(payload['active_puzzles.json'])[self.pid]
+        self.assertTrue(restored_round['finished'])
+        self.assertEqual(restored_round['final_result'],result[0][1])
+        destination=game.STATE_DIR/'automatic-restored'
+        backup_state.restore_backup(archives[0],destination)
+        with sqlite3.connect(destination/'game_results.sqlite3') as db:
+            row=db.execute('SELECT points,hints_used FROM game_results WHERE puzzle_id=?',(self.pid,)).fetchone()
+        self.assertEqual(row,(result[0][1]['points'],result[0][1]['hints_used']))
 
     def test_backup_restores_playable_round_challenges_and_finished_results(self):
         game=self.game
         self.assertEqual(self.request('/api/hint?'+urllib.parse.urlencode({'puzzle_id':self.pid,'level':2,'route_revision':0}))[0],200)
         self.assertEqual(self.move()[0],200)
+
         self.assertEqual(self.request('/api/backtrack',{'route_revision':1})[0],200)
         self.assertEqual(self.move()[0],200)
         original_pid=self.pid
